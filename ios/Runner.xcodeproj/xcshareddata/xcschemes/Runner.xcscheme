@@ -22,13 +22,13 @@
          </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
-   <TestAction
+   <VanillaHereticction
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
-      <Testables>
-      </Testables>
+      <VanillaHereticbles>
+      </VanillaHereticbles>
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
@@ -40,7 +40,7 @@
       </MacroExpansion>
       <AdditionalOptions>
       </AdditionalOptions>
-   </TestAction>
+   </VanillaHereticction>
    <LaunchAction
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"

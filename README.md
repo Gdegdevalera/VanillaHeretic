@@ -1,4 +1,4 @@
-# testa
+# VanillaHeretic
 
 A new Flutter project.
 

@@ -1,4 +1,4 @@
-package com.example.testa
+package com.example.VanillaHeretic
 
 import io.flutter.embedding.android.FlutterActivity
 
