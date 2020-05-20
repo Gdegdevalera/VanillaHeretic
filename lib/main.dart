@@ -2,11 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:html/parser.dart' show parse;
 import 'package:http/http.dart' as http;
+import 'package:html/dom.dart' as DOM;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert' show json;
 import 'decoder.dart' show decodeCp1251;
 
 void main() {
   runApp(MyApp());
+}
+
+class Post
+{
+  String date;
+  String content;
+  DOM.Element html;
 }
 
 class MyApp extends StatelessWidget {
@@ -55,7 +64,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  Future<List<String>> _texts;
+  Future<List<Post>> _texts;
   int _viewIndex = 0;
   int _totalIndex = 0;
   double _scale = 1.0;
@@ -63,13 +72,42 @@ class _MyHomePageState extends State<MyHomePage> {
   Offset _offset = Offset.zero;
   ScrollController _scroller = new ScrollController();
 
+  bool _skipSuggestion = true;
+
   @override
   void initState() {
     super.initState();
     _texts = fetchTexts();
+    _loadPreferences();
   }
 
-  Future<List<String>> fetchTexts({Future<List<String>> prevFuture}) async {
+  @override
+  void dispose() {
+    _savePreferences();
+    super.dispose();
+  }
+
+  _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _skipSuggestion = prefs.getBool('skipSuggestion') ?? false;
+      _scale = prefs.getDouble('scale') ?? 1.0;
+    });
+  }
+
+  _savePreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    prefs.setBool('skipSuggestion', _skipSuggestion); 
+    prefs.setDouble('scale', _scale);
+  }
+
+  closeSuggestion() {
+    setState(() {
+      _skipSuggestion = true;
+    });
+  }
+
+  Future<List<Post>> fetchTexts({Future<List<Post>> prevFuture}) async {
     if(prevFuture == null)
       prevFuture = Future.value([]);
 
@@ -77,12 +115,13 @@ class _MyHomePageState extends State<MyHomePage> {
       return fetch(_totalIndex)
         .then((newTexts) => oldTexts + 
           newTexts
-            .where((y) => oldTexts.every((x) => x.substring(0,10) != y.substring(0, 10)))
+            .where((y) => oldTexts.every((x) =>
+               x.content.substring(0,10) != y.content.substring(0, 10)))
             .toList());
     });
   }
 
-  Future<List<String>> fetch(int startFrom) async {
+  Future<List<Post>> fetch(int startFrom) async {
     final response = await http.post(
       'https://vk.com/al_wall.php',
       body: {
@@ -96,18 +135,24 @@ class _MyHomePageState extends State<MyHomePage> {
       var payload = jsonResponse['payload'][1][0].toString();
       var document = parse(decodeCp1251(payload));
 
-      var allPosts = document.querySelectorAll('.wall_post_text');
+      var allPosts = document.querySelectorAll('._post_content');
       _totalIndex += allPosts.length;
       var posts = allPosts
-        .where((element) => element.innerHtml.length > 300)
         .map((post) {
-          post.querySelectorAll('a').forEach((element) { element.remove(); });
-          return removeAllHtmlTags(post.innerHtml.replaceAll('<br>', '\n'));
+          return Post()
+            ..date = post.querySelector('.rel_date')?.innerHtml
+            ..html = post.querySelector('.wall_post_text');
+        })
+        .where((post) => (post.html?.innerHtml?.length ?? 0) > 300)
+        .map((post) {
+          post.html.querySelectorAll('a').forEach((element) { element.remove(); });
+          post.content = removeAllHtmlTags(post.html.innerHtml.replaceAll('<br>', '\n'));
+          return post;
         })
         .toList();
       return posts;
     } else {
-      return [ '[Error!]' ];
+      return null;
     }
   }
 
@@ -139,12 +184,10 @@ class _MyHomePageState extends State<MyHomePage> {
     // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
         title: Text(widget.title)
       ),
       body: Center(
-        child: FutureBuilder<List<String>>(
+        child: FutureBuilder<List<Post>>(
             future: _texts,
             builder: (context, snapshot) {
               if (snapshot.hasData) {
@@ -155,7 +198,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   onScaleUpdate: (ScaleUpdateDetails details) {
                     setState(() {
                       var newScale = _previousScale * details.scale;
-                      if(newScale >= 0.5 && newScale <= 2.5) { 
+                      if(newScale >= 0.5 && newScale <= 1.5) { 
                         _scale = newScale;
                       }
                     });
@@ -172,10 +215,12 @@ class _MyHomePageState extends State<MyHomePage> {
                     setState(() {
                       var screenWidth = MediaQuery.of(context).size.width;
                       if(_offset.dx.abs() > screenWidth / 3) {
-                        if(_offset.dx > 0 && _viewIndex > 0) {
+                        if(_offset.dx > 0 
+                            && _viewIndex > 0) {
                           _viewIndex--;
                         }
-                        if(_offset.dx < 0 && _viewIndex < snapshot.data.length - 1) {
+                        if(_offset.dx < 0 
+                            && _viewIndex < snapshot.data.length - 1) {
                           _viewIndex++;
                         }
                         _scroller.jumpTo(0);
@@ -187,25 +232,26 @@ class _MyHomePageState extends State<MyHomePage> {
                       _offset = Offset.zero;
                     });
                   },
-                  child: Stack(
-                    children: [ 
-                      Transform.translate(
-                        offset: _offset,
-                        child: SingleChildScrollView(
-                          controller: _scroller,
-                          child: getContent(snapshot.data, _viewIndex)
-                        ),
-                      ),
-                      Transform.translate(offset: 
-                        Offset(_offset.dx + MediaQuery.of(context).size.width, 0),
-                        child: getContent(snapshot.data, _viewIndex + 1)
-                      ),
-                      Transform.translate(offset: 
-                        Offset(_offset.dx - MediaQuery.of(context).size.width, 0),
-                        child: getContent(snapshot.data, _viewIndex - 1)
-                      )
-                    ],
-                  ),
+                  child: 
+                    Stack(
+                      children: [ 
+                        Transform.translate(
+                            offset: _offset,
+                            child: SingleChildScrollView(
+                              controller: _scroller,
+                              child: getContent(snapshot.data, _viewIndex)
+                            ),
+                          ),
+                          Transform.translate(offset: 
+                            Offset(_offset.dx + MediaQuery.of(context).size.width, 0),
+                            child: getContent(snapshot.data, _viewIndex + 1)
+                          ),
+                          Transform.translate(offset: 
+                            Offset(_offset.dx - MediaQuery.of(context).size.width, 0),
+                            child: getContent(snapshot.data, _viewIndex - 1)
+                          ),
+                          createSuggestionWidget()
+                        ])
                 );
               } else if (snapshot.hasError) {
                 return Text("${snapshot.error}");
@@ -215,25 +261,92 @@ class _MyHomePageState extends State<MyHomePage> {
               return CircularProgressIndicator();
             }),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _refresh,
-        tooltip: 'Increment',
-        child: Icon(Icons.refresh),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+      floatingActionButton: 
+        _skipSuggestion 
+          ? FloatingActionButton(
+              onPressed: _refresh,
+              tooltip: 'Refresh',
+              child: Icon(Icons.refresh),
+            )
+          : null,
     );
   }
 
-  Widget getContent(List<String> data, int index) {
+  Widget createSuggestionWidget() {
+    return Container(
+        decoration: BoxDecoration(color: Color.fromARGB(128, 128, 128, 128)),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey, 
+                  boxShadow: [BoxShadow(
+                      color: Color.fromARGB(255, 128, 128, 128), 
+                      blurRadius: 3,
+                      offset: Offset(1, 3)
+                    )]
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: <Widget>[
+                      Text(
+                        "Свайпай чтобы листать",
+                        style: TextStyle(fontSize: 20)),
+                      Padding(
+                        padding: EdgeInsets.all(30),
+                        child: Image.asset(
+                              'images/suggestion_swipe.png',
+                              height: 100,
+                          )
+                      ),
+                      Text(
+                        "Щипком меняй размер шрифта",
+                        style: TextStyle(fontSize: 20)),
+                      Padding(
+                        padding: EdgeInsets.all(30),
+                        child: Image.asset(
+                          'images/suggestion_pinch.png',
+                          height: 100,
+                          )
+                      ),
+                      RaisedButton(
+                        onPressed: closeSuggestion,
+                        color: Colors.lightBlue,
+                        child: Padding(
+                          padding: EdgeInsets.all(15),
+                          child: Text(
+                            "Понятно",
+                            style: TextStyle(fontSize: 24, color: Colors.white)
+                          ),
+                        )
+                      )
+                    ],
+                    ),
+                )
+                ),
+            ],
+          )
+          ),
+        );
+  }
+
+  Widget getContent(List<Post> data, int index) {
     if(index < 0 || index >= data.length)
       return null;
 
     return ConstrainedBox(
       constraints: BoxConstraints(minHeight: MediaQuery.of(context).size.height),
       child: Container(
-        color: Colors.white,
+        //color: Colors.white,
         child: Padding(
           padding: EdgeInsets.fromLTRB(10, 0, 10, 20),
-          child: Text(data[index], 
+          child: Text('Опубликовано: ' + data[index].date + '\n\n' + data[index].content, 
             style: GoogleFonts.openSans(fontSize: 16 * _scale)
           ),
         )
