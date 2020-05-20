@@ -11,8 +11,7 @@ void main() {
   runApp(MyApp());
 }
 
-class Post
-{
+class Post {
   String date;
   String content;
   DOM.Element html;
@@ -23,7 +22,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Ванильный еретик',
       theme: ThemeData(
         // This is the theme of your application.
         //
@@ -67,12 +66,12 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<List<Post>> _texts;
   int _viewIndex = 0;
   int _totalIndex = 0;
+  final double minScale = 0.5;
+  final double maxScale = 1.5;
   double _scale = 1.0;
   double _previousScale;
   Offset _offset = Offset.zero;
   ScrollController _scroller = new ScrollController();
-
-  bool _skipSuggestion = true;
 
   @override
   void initState() {
@@ -90,47 +89,42 @@ class _MyHomePageState extends State<MyHomePage> {
   _loadPreferences() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _skipSuggestion = prefs.getBool('skipSuggestion') ?? false;
       _scale = prefs.getDouble('scale') ?? 1.0;
     });
+
+    final skipOnboarding = prefs.getBool('skipOnboarding') ?? false;  
+    if (!skipOnboarding) {
+      await _showOnboarding();
+      await prefs.setBool('skipOnboarding', true);
+    }
   }
 
   _savePreferences() async {
     final prefs = await SharedPreferences.getInstance();
-    prefs.setBool('skipSuggestion', _skipSuggestion); 
     prefs.setDouble('scale', _scale);
   }
 
-  closeSuggestion() {
-    setState(() {
-      _skipSuggestion = true;
-    });
-  }
-
   Future<List<Post>> fetchTexts({Future<List<Post>> prevFuture}) async {
-    if(prevFuture == null)
-      prevFuture = Future.value([]);
+    if (prevFuture == null) prevFuture = Future.value([]);
 
     return prevFuture.then((oldTexts) {
-      return fetch(_totalIndex)
-        .then((newTexts) => oldTexts + 
+      return fetch(_totalIndex).then((newTexts) =>
+          oldTexts +
           newTexts
-            .where((y) => oldTexts.every((x) =>
-               x.content.substring(0,10) != y.content.substring(0, 10)))
-            .toList());
+              .where((y) => oldTexts.every((x) =>
+                  x.content.substring(0, 10) != y.content.substring(0, 10)))
+              .toList());
     });
   }
 
   Future<List<Post>> fetch(int startFrom) async {
-    final response = await http.post(
-      'https://vk.com/al_wall.php',
-      body: {
-        'act': 'get_wall',
-        'owner_id': '-61574859',
-        'wall_start_from': startFrom.toString(),
-        'al': '1'
-      });
-    if(response.statusCode == 200) {
+    final response = await http.post('https://vk.com/al_wall.php', body: {
+      'act': 'get_wall',
+      'owner_id': '-61574859',
+      'wall_start_from': startFrom.toString(),
+      'al': '1'
+    });
+    if (response.statusCode == 200) {
       var jsonResponse = json.decode(response.body.substring(4));
       var payload = jsonResponse['payload'][1][0].toString();
       var document = parse(decodeCp1251(payload));
@@ -138,18 +132,21 @@ class _MyHomePageState extends State<MyHomePage> {
       var allPosts = document.querySelectorAll('._post_content');
       _totalIndex += allPosts.length;
       var posts = allPosts
-        .map((post) {
-          return Post()
-            ..date = post.querySelector('.rel_date')?.innerHtml
-            ..html = post.querySelector('.wall_post_text');
-        })
-        .where((post) => (post.html?.innerHtml?.length ?? 0) > 300)
-        .map((post) {
-          post.html.querySelectorAll('a').forEach((element) { element.remove(); });
-          post.content = removeAllHtmlTags(post.html.innerHtml.replaceAll('<br>', '\n'));
-          return post;
-        })
-        .toList();
+          .map((post) {
+            return Post()
+              ..date = post.querySelector('.rel_date')?.innerHtml
+              ..html = post.querySelector('.wall_post_text');
+          })
+          .where((post) => (post.html?.innerHtml?.length ?? 0) > 300)
+          .map((post) {
+            post.html.querySelectorAll('a').forEach((element) {
+              element.remove();
+            });
+            post.content =
+                removeAllHtmlTags(post.html.innerHtml.replaceAll('<br>', '\n'));
+            return post;
+          })
+          .toList();
       return posts;
     } else {
       return null;
@@ -157,11 +154,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   String removeAllHtmlTags(String htmlText) {
-    RegExp exp = RegExp(
-      r"<[^>]*>",
-      multiLine: true,
-      caseSensitive: true
-    );
+    RegExp exp = RegExp(r"<[^>]*>", multiLine: true, caseSensitive: true);
 
     return htmlText.replaceAll(exp, '');
   }
@@ -183,174 +176,146 @@ class _MyHomePageState extends State<MyHomePage> {
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title)
-      ),
-      body: Center(
-        child: FutureBuilder<List<Post>>(
-            future: _texts,
-            builder: (context, snapshot) {
-              if (snapshot.hasData) {
-                return GestureDetector(
-                  onScaleStart: (ScaleStartDetails details) {
-                    _previousScale = _scale;
-                  },
-                  onScaleUpdate: (ScaleUpdateDetails details) {
-                    setState(() {
-                      var newScale = _previousScale * details.scale;
-                      if(newScale >= 0.5 && newScale <= 1.5) { 
-                        _scale = newScale;
-                      }
-                    });
-                  },
-                  onScaleEnd: (ScaleEndDetails details) {
-                    _previousScale = null;
-                  },
-                  onHorizontalDragUpdate: (details) {
-                    setState(() {
-                      _offset += details.delta;
-                    });
-                  },
-                  onHorizontalDragEnd: (details) {
-                    setState(() {
-                      var screenWidth = MediaQuery.of(context).size.width;
-                      if(_offset.dx.abs() > screenWidth / 3) {
-                        if(_offset.dx > 0 
-                            && _viewIndex > 0) {
-                          _viewIndex--;
-                        }
-                        if(_offset.dx < 0 
-                            && _viewIndex < snapshot.data.length - 1) {
-                          _viewIndex++;
-                        }
-                        _scroller.jumpTo(0);
+        appBar: AppBar(title: Text(widget.title)),
+        body: Center(
+          child: FutureBuilder<List<Post>>(
+              future: _texts,
+              builder: (context, snapshot) {
+                if (snapshot.hasData) {
+                  return GestureDetector(
+                      onScaleStart: (ScaleStartDetails details) {
+                        _previousScale = _scale;
+                      },
+                      onScaleUpdate: (ScaleUpdateDetails details) {
+                        setState(() {
+                          var newScale = _previousScale * details.scale;
+                          if (newScale >= minScale && newScale <= maxScale) {
+                            _scale = newScale;
+                          }
+                          if (newScale < minScale) _scale = minScale;
+                          if (newScale > maxScale) _scale = maxScale;
+                        });
+                      },
+                      onScaleEnd: (ScaleEndDetails details) {
+                        _previousScale = null;
+                        _savePreferences();
+                      },
+                      onHorizontalDragUpdate: (details) {
+                        setState(() {
+                          _offset += details.delta;
+                        });
+                      },
+                      onHorizontalDragEnd: (details) {
+                        setState(() {
+                          var screenWidth = MediaQuery.of(context).size.width;
+                          if (_offset.dx.abs() > screenWidth / 3) {
+                            if (_offset.dx > 0 && _viewIndex > 0) {
+                              _viewIndex--;
+                            }
+                            if (_offset.dx < 0 &&
+                                _viewIndex < snapshot.data.length - 1) {
+                              _viewIndex++;
+                            }
+                            _scroller.jumpTo(0);
 
-                        if(_viewIndex > snapshot.data.length - 3) {
-                          _texts = fetchTexts(prevFuture: _texts);
-                        }
-                      }
-                      _offset = Offset.zero;
-                    });
-                  },
-                  child: 
-                    Stack(
-                      children: [ 
+                            if (_viewIndex > snapshot.data.length - 3) {
+                              _texts = fetchTexts(prevFuture: _texts);
+                            }
+                          }
+                          _offset = Offset.zero;
+                        });
+                      },
+                      child: Stack(children: [
                         Transform.translate(
-                            offset: _offset,
-                            child: SingleChildScrollView(
+                          offset: _offset,
+                          child: SingleChildScrollView(
                               controller: _scroller,
-                              child: getContent(snapshot.data, _viewIndex)
-                            ),
-                          ),
-                          Transform.translate(offset: 
-                            Offset(_offset.dx + MediaQuery.of(context).size.width, 0),
-                            child: getContent(snapshot.data, _viewIndex + 1)
-                          ),
-                          Transform.translate(offset: 
-                            Offset(_offset.dx - MediaQuery.of(context).size.width, 0),
-                            child: getContent(snapshot.data, _viewIndex - 1)
-                          ),
-                          createSuggestionWidget()
-                        ])
-                );
-              } else if (snapshot.hasError) {
-                return Text("${snapshot.error}");
-              }
+                              child: getContent(snapshot.data, _viewIndex)),
+                        ),
+                        Transform.translate(
+                            offset: Offset(
+                                _offset.dx + MediaQuery.of(context).size.width,
+                                0),
+                            child: getContent(snapshot.data, _viewIndex + 1)),
+                        Transform.translate(
+                            offset: Offset(
+                                _offset.dx - MediaQuery.of(context).size.width,
+                                0),
+                            child: getContent(snapshot.data, _viewIndex - 1)),
+                        //createSuggestionWidget()
+                      ]));
+                } else if (snapshot.hasError) {
+                  return Text("${snapshot.error}");
+                }
 
-              // By default, show a loading spinner.
-              return CircularProgressIndicator();
-            }),
-      ),
-      floatingActionButton: 
-        _skipSuggestion 
-          ? FloatingActionButton(
-              onPressed: _refresh,
-              tooltip: 'Refresh',
-              child: Icon(Icons.refresh),
+                // By default, show a loading spinner.
+                return CircularProgressIndicator();
+              }),
+        ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: _refresh,
+          tooltip: 'Refresh',
+          child: Icon(Icons.refresh),
+        ));
+  }
+
+  Future<void> _showOnboarding() async {
+    final double fontSize = 15;
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false, // user must tap button!
+      builder: (BuildContext context) {
+        return AlertDialog(
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: <Widget>[
+                Text("Свайпай чтобы листать", style: TextStyle(fontSize: fontSize)),
+                Padding(
+                    padding: EdgeInsets.all(30),
+                    child: Image.asset(
+                      'images/suggestion_swipe.png',
+                      height: 70,
+                    )),
+                Text("Текст можно растягивать",
+                    style: TextStyle(fontSize: fontSize)),
+                Padding(
+                    padding: EdgeInsets.all(30),
+                    child: Image.asset(
+                      'images/suggestion_pinch.png',
+                      height: 70,
+                    )),
+                RaisedButton(
+                    color: Colors.lightBlue,
+                    textColor: Colors.white,
+                    child: Text('Понятно', style: TextStyle(fontSize: fontSize)),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                  )
+                ],
+              ),
             )
-          : null,
+          );
+        },
     );
   }
 
-  Widget createSuggestionWidget() {
-    return Container(
-        decoration: BoxDecoration(color: Color.fromARGB(128, 128, 128, 128)),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: <Widget>[
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.grey, 
-                  boxShadow: [BoxShadow(
-                      color: Color.fromARGB(255, 128, 128, 128), 
-                      blurRadius: 3,
-                      offset: Offset(1, 3)
-                    )]
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: <Widget>[
-                      Text(
-                        "Свайпай чтобы листать",
-                        style: TextStyle(fontSize: 20)),
-                      Padding(
-                        padding: EdgeInsets.all(30),
-                        child: Image.asset(
-                              'images/suggestion_swipe.png',
-                              height: 100,
-                          )
-                      ),
-                      Text(
-                        "Щипком меняй размер шрифта",
-                        style: TextStyle(fontSize: 20)),
-                      Padding(
-                        padding: EdgeInsets.all(30),
-                        child: Image.asset(
-                          'images/suggestion_pinch.png',
-                          height: 100,
-                          )
-                      ),
-                      RaisedButton(
-                        onPressed: closeSuggestion,
-                        color: Colors.lightBlue,
-                        child: Padding(
-                          padding: EdgeInsets.all(15),
-                          child: Text(
-                            "Понятно",
-                            style: TextStyle(fontSize: 24, color: Colors.white)
-                          ),
-                        )
-                      )
-                    ],
-                    ),
-                )
-                ),
-            ],
-          )
-          ),
-        );
-  }
-
   Widget getContent(List<Post> data, int index) {
-    if(index < 0 || index >= data.length)
-      return null;
+    if (index < 0 || index >= data.length) return null;
 
     return ConstrainedBox(
-      constraints: BoxConstraints(minHeight: MediaQuery.of(context).size.height),
+      constraints:
+          BoxConstraints(minHeight: MediaQuery.of(context).size.height),
       child: Container(
-        //color: Colors.white,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(10, 0, 10, 20),
-          child: Text('Опубликовано: ' + data[index].date + '\n\n' + data[index].content, 
-            style: GoogleFonts.openSans(fontSize: 16 * _scale)
-          ),
-        )
-      ),
+          //color: Colors.white,
+          child: Padding(
+        padding: EdgeInsets.fromLTRB(10, 0, 10, 20),
+        child: Text(
+            'Опубликовано: ' + data[index].date + '\n\n' + data[index].content,
+            style: GoogleFonts.openSans(fontSize: 16 * _scale)),
+      )),
     );
   }
 }
