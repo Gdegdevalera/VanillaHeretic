@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:html/parser.dart' show parse;
 import 'package:http/http.dart' as http;
@@ -62,21 +63,34 @@ class MyHomePage extends StatefulWidget {
   _MyHomePageState createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage>
+  with SingleTickerProviderStateMixin {
+
+  final minScale = 0.5;
+  final maxScale = 1.5;
+  final _scroller = ScrollController();
+  AnimationController _animationController;
+
   Future<List<Post>> _texts;
   int _viewIndex = 0;
   int _totalIndex = 0;
-  final double minScale = 0.5;
-  final double maxScale = 1.5;
   double _scale = 1.0;
   double _previousScale;
   Offset _offset = Offset.zero;
-  ScrollController _scroller = new ScrollController();
+  Animation<Offset> _animation;
 
   @override
   void initState() {
     super.initState();
     _texts = fetchTexts();
+
+    _animationController = AnimationController(vsync: this);
+    _animationController.addListener(() {
+      setState(() {
+        _offset = _animation.value;
+      });
+    });
+
     _loadPreferences();
   }
 
@@ -102,6 +116,23 @@ class _MyHomePageState extends State<MyHomePage> {
   _savePreferences() async {
     final prefs = await SharedPreferences.getInstance();
     prefs.setDouble('scale', _scale);
+  }
+
+  _runAnimation() {
+    _animation = _animationController.drive(
+      Tween(
+        begin: _offset,
+        end: Offset.zero
+      )
+    );
+    const spring = SpringDescription(
+      mass: 30,
+      stiffness: 1,
+      damping: 1
+    );
+    
+    var simulation = SpringSimulation(spring, 0, 1, 0.1);
+    _animationController.animateWith(simulation);
   }
 
   Future<List<Post>> fetchTexts({Future<List<Post>> prevFuture}) async {
@@ -201,6 +232,7 @@ class _MyHomePageState extends State<MyHomePage> {
                         _savePreferences();
                       },
                       onHorizontalDragUpdate: (details) {
+                        _animationController.stop();
                         setState(() {
                           _offset += details.delta;
                         });
@@ -209,21 +241,24 @@ class _MyHomePageState extends State<MyHomePage> {
                         setState(() {
                           var screenWidth = MediaQuery.of(context).size.width;
                           if (_offset.dx.abs() > screenWidth / 3) {
-                            if (_offset.dx > 0 && _viewIndex > 0) {
-                              _viewIndex--;
-                            }
-                            if (_offset.dx < 0 &&
-                                _viewIndex < snapshot.data.length - 1) {
-                              _viewIndex++;
+                            if (_offset.dx > 0 
+                              && _viewIndex > 0) {
+                                _offset = _offset.translate(-screenWidth, 0);
+                                _viewIndex--;
+                            } 
+                            else if (_offset.dx < 0 
+                              && _viewIndex < snapshot.data.length - 1) {
+                                _offset = _offset.translate(screenWidth, 0);
+                                _viewIndex++;
                             }
                             _scroller.jumpTo(0);
-
-                            if (_viewIndex > snapshot.data.length - 3) {
-                              _texts = fetchTexts(prevFuture: _texts);
-                            }
                           }
-                          _offset = Offset.zero;
                         });
+                        _runAnimation();
+
+                        if (_viewIndex > snapshot.data.length - 3) {
+                          _texts = fetchTexts(prevFuture: _texts);
+                        }
                       },
                       child: Stack(children: [
                         Transform.translate(
