@@ -1,4 +1,4 @@
-package com.example.VanillaHeretic
+package com.VanillaHeretic
 
 import io.flutter.embedding.android.FlutterActivity
 
