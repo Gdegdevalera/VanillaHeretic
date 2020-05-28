@@ -5,39 +5,39 @@ import 'package:html/parser.dart' show parse;
 import 'package:http/http.dart' as http;
 import 'package:html/dom.dart' as DOM;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert' show json;
 import 'decoder.dart' show decodeCp1251;
+import 'dart:math' as math;
 
 void main() {
   runApp(MyApp());
 }
 
+class Reply {
+  String img;
+  String name;
+  String content;
+}
+
 class Post {
+  String id;
   String date;
   String content;
+  String likesCount;
+  List<Reply> replies;
+  
   DOM.Element html;
+  List<DOM.Element> repliesHtml;
 }
 
 class MyApp extends StatelessWidget {
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Ванильный еретик',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // Try running your application with "flutter run". You'll see the
-        // application has a blue toolbar. Then, without quitting the app, try
-        // changing the primarySwatch below to Colors.green and then invoke
-        // "hot reload" (press "r" in the console where you ran "flutter run",
-        // or simply save your changes to "hot reload" in a Flutter IDE).
-        // Notice that the counter didn't reset back to zero; the application
-        // is not restarted.
         primarySwatch: Colors.blue,
-        // This makes the visual density adapt to the platform that you run
-        // the app on. For desktop platforms, the controls will be smaller and
-        // closer together (more dense) than on mobile platforms.
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
       home: MyHomePage(title: 'Ванильный еретик'),
@@ -48,36 +48,30 @@ class MyApp extends StatelessWidget {
 class MyHomePage extends StatefulWidget {
   MyHomePage({Key key, this.title}) : super(key: key);
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
   final String title;
 
   @override
-  _MyHomePageState createState() => _MyHomePageState();
+  MyHomePageState createState() => MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage>
+class MyHomePageState extends State<MyHomePage>
   with SingleTickerProviderStateMixin {
 
+  final minTextLength = 1000;
   final minScale = 0.5;
   final maxScale = 1.5;
   final _scroller = ScrollController();
   AnimationController _animationController;
+  int _updateFactor = 0;
 
   Future<List<Post>> _texts;
+  bool _loading = false;
   int _viewIndex = 0;
   int _totalIndex = 0;
   double _scale = 1.0;
   double _previousScale;
-  Offset _offset = Offset.zero;
-  Animation<Offset> _animation;
+  double _factor = 0.0;
+  Animation<double> _animation;
 
   @override
   void initState() {
@@ -87,20 +81,20 @@ class _MyHomePageState extends State<MyHomePage>
     _animationController = AnimationController(vsync: this);
     _animationController.addListener(() {
       setState(() {
-        _offset = _animation.value;
+        _factor = _animation.value;
       });
     });
 
-    _loadPreferences();
+    loadPreferences();
   }
 
   @override
   void dispose() {
-    _savePreferences();
+    savePreferences();
     super.dispose();
   }
 
-  _loadPreferences() async {
+  loadPreferences() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _scale = prefs.getDouble('scale') ?? 1.0;
@@ -113,16 +107,16 @@ class _MyHomePageState extends State<MyHomePage>
     }
   }
 
-  _savePreferences() async {
+  savePreferences() async {
     final prefs = await SharedPreferences.getInstance();
     prefs.setDouble('scale', _scale);
   }
 
-  _runAnimation() {
+  runAnimation() {
     _animation = _animationController.drive(
       Tween(
-        begin: _offset,
-        end: Offset.zero
+        begin: _factor,
+        end: 0.0
       )
     );
     const spring = SpringDescription(
@@ -131,56 +125,80 @@ class _MyHomePageState extends State<MyHomePage>
       damping: 1
     );
     
-    var simulation = SpringSimulation(spring, 0, 1, 0.1);
+    var simulation = SpringSimulation(spring, 0, 1, 0.001);
+
     _animationController.animateWith(simulation);
   }
 
   Future<List<Post>> fetchTexts({Future<List<Post>> prevFuture}) async {
+    _loading = true;
     if (prevFuture == null) prevFuture = Future.value([]);
 
     return prevFuture.then((oldTexts) {
-      return fetch(_totalIndex).then((newTexts) =>
-          oldTexts +
+      return fetch(_totalIndex).then((newTexts) {
+        _loading = false;
+        return oldTexts +
           newTexts
               .where((y) => oldTexts.every((x) =>
                   x.content.substring(0, 10) != y.content.substring(0, 10)))
-              .toList());
+              .toList();
+      }, onError: (error) {
+        _loading = false;
+        if(oldTexts.length > 0) return oldTexts;
+        throw error;
+      });
     });
   }
 
   Future<List<Post>> fetch(int startFrom) async {
-    final response = await http.post('https://vk.com/al_wall.php', body: {
-      'act': 'get_wall',
-      'owner_id': '-61574859',
-      'wall_start_from': startFrom.toString(),
-      'al': '1'
-    });
-    if (response.statusCode == 200) {
-      var jsonResponse = json.decode(response.body.substring(4));
-      var payload = jsonResponse['payload'][1][0].toString();
-      var document = parse(decodeCp1251(payload));
+    try {
+      final response = await http.post('https://vk.com/al_wall.php', body: {
+        'act': 'get_wall',
+        'owner_id': '-61574859',
+        'wall_start_from': startFrom.toString(),
+        'al': '1'
+      });
+      if (response.statusCode == 200) {
+        var jsonResponse = json.decode(response.body.substring(4));
+        var payload = jsonResponse['payload'][1][0].toString();
+        var document = parse(decodeCp1251(payload));
 
-      var allPosts = document.querySelectorAll('._post_content');
-      _totalIndex += allPosts.length;
-      var posts = allPosts
-          .map((post) {
-            return Post()
-              ..date = post.querySelector('.rel_date')?.innerHtml
-              ..html = post.querySelector('.wall_post_text');
-          })
-          .where((post) => (post.html?.innerHtml?.length ?? 0) > 300)
-          .map((post) {
-            post.html.querySelectorAll('a').forEach((element) {
-              element.remove();
-            });
-            post.content =
-                removeAllHtmlTags(post.html.innerHtml.replaceAll('<br>', '\n'));
-            return post;
-          })
-          .toList();
-      return posts;
-    } else {
-      return null;
+        var allPosts = document.querySelectorAll('._post_content');
+        _totalIndex += allPosts.length;
+        var posts = allPosts
+            .map((post) => Post()
+                ..id = post.querySelector('.post_img').map((x) => x.attributes['data-post-id'])
+                ..date = post.querySelector('.rel_date')?.innerHtml
+                ..likesCount = post.querySelector('.like_button_count')?.innerHtml
+                ..html = post.querySelector('.wall_post_text')
+                ..repliesHtml = post.querySelectorAll('.replies')
+            )
+            .where((post) => (post.html?.innerHtml?.length ?? 0) > minTextLength)
+            .map((post) {
+              post.html.querySelectorAll('a').forEach((element) {
+                element.remove();
+              });
+              post.content =
+                  removeAllHtmlTags(post.html.innerHtml.replaceAll('<br>', '\n'));
+                  //.substring(0, 100);
+              post.replies = post.repliesHtml
+                .where((reply) => reply.querySelector('img') != null)
+                .map((reply) => Reply()
+                  ..img = reply.querySelector('.reply_img')?.attributes['src']
+                  ..name = reply.querySelector('.author')?.innerHtml
+                  ..content = reply.querySelector('.wall_reply_text')?.innerHtml
+                )
+                .toList();
+              return post;
+            })
+            .toList();
+        return posts;
+      } else {
+        return new List<Post>();
+      }
+    }
+    catch(e) {
+      throw Exception("Ошибка. Проверьте соединение с Интернет");
     }
   }
 
@@ -190,7 +208,7 @@ class _MyHomePageState extends State<MyHomePage>
     return htmlText.replaceAll(exp, '');
   }
 
-  void _refresh() {
+  void refresh() {
     setState(() {
       _viewIndex = 0;
       _totalIndex = 0;
@@ -207,88 +225,135 @@ class _MyHomePageState extends State<MyHomePage>
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
     return Scaffold(
-        appBar: AppBar(title: Text(widget.title)),
-        body: Center(
-          child: FutureBuilder<List<Post>>(
-              future: _texts,
-              builder: (context, snapshot) {
-                if (snapshot.hasData) {
-                  return GestureDetector(
-                      onScaleStart: (ScaleStartDetails details) {
-                        _previousScale = _scale;
-                      },
-                      onScaleUpdate: (ScaleUpdateDetails details) {
-                        setState(() {
-                          var newScale = _previousScale * details.scale;
-                          if (newScale >= minScale && newScale <= maxScale) {
-                            _scale = newScale;
-                          }
-                          if (newScale < minScale) _scale = minScale;
-                          if (newScale > maxScale) _scale = maxScale;
-                        });
-                      },
-                      onScaleEnd: (ScaleEndDetails details) {
-                        _previousScale = null;
-                        _savePreferences();
-                      },
-                      onHorizontalDragUpdate: (details) {
-                        _animationController.stop();
-                        setState(() {
-                          _offset += details.delta;
-                        });
-                      },
-                      onHorizontalDragEnd: (details) {
-                        setState(() {
-                          var screenWidth = MediaQuery.of(context).size.width;
-                          if (_offset.dx.abs() > screenWidth / 3) {
-                            if (_offset.dx > 0 
-                              && _viewIndex > 0) {
-                                _offset = _offset.translate(-screenWidth, 0);
-                                _viewIndex--;
-                            } 
-                            else if (_offset.dx < 0 
-                              && _viewIndex < snapshot.data.length - 1) {
-                                _offset = _offset.translate(screenWidth, 0);
-                                _viewIndex++;
+        //appBar: AppBar(title: Text(widget.title)),
+        body: SafeArea(
+          child: Center(
+            child: FutureBuilder<List<Post>>(
+                future: _texts,
+                builder: (context, snapshot) {
+                  if (snapshot.hasData) {
+                    var screenSize = MediaQuery.of(context).size;
+                    return GestureDetector(
+                        onScaleStart: (ScaleStartDetails details) {
+                          _previousScale = _scale;
+                        },
+                        onScaleUpdate: (ScaleUpdateDetails details) {
+                          setState(() {
+                            var newScale = _previousScale * details.scale;
+                            if (newScale >= minScale && newScale <= maxScale) {
+                              _scale = newScale;
                             }
-                            _scroller.jumpTo(0);
+                            if (newScale < minScale) _scale = minScale;
+                            if (newScale > maxScale) _scale = maxScale;
+                          });
+                        },
+                        onScaleEnd: (ScaleEndDetails details) {
+                          _previousScale = null;
+                          savePreferences();
+                        },
+                        onHorizontalDragUpdate: (details) {
+                          _animationController.stop();
+                          _updateFactor++;
+                          var screenWidth = screenSize.width;
+                          _factor += details.delta.dx / screenWidth;
+
+                          if(_updateFactor == 1)
+                          {
+                            setState(() { });
                           }
-                        });
-                        _runAnimation();
 
-                        if (_viewIndex > snapshot.data.length - 3) {
-                          _texts = fetchTexts(prevFuture: _texts);
-                        }
-                      },
-                      child: Stack(children: [
-                        Transform.translate(
-                          offset: _offset,
-                          child: SingleChildScrollView(
-                              controller: _scroller,
-                              child: getContent(snapshot.data, _viewIndex)),
-                        ),
-                        Transform.translate(
-                            offset: Offset(
-                                _offset.dx + MediaQuery.of(context).size.width,
-                                0),
-                            child: getContent(snapshot.data, _viewIndex + 1)),
-                        Transform.translate(
-                            offset: Offset(
-                                _offset.dx - MediaQuery.of(context).size.width,
-                                0),
-                            child: getContent(snapshot.data, _viewIndex - 1)),
-                        //createSuggestionWidget()
-                      ]));
-                } else if (snapshot.hasError) {
-                  return Text("${snapshot.error}");
-                }
+                          if(_updateFactor >= 5)
+                            _updateFactor = 0;
+                        },
+                        onHorizontalDragEnd: (details) {
+                          setState(() {
+                            if (_factor.abs() > 0.1) {
+                              if (_factor > 0 
+                                && _viewIndex > 0) {
+                                  _factor -= 1;
+                                  _viewIndex--;
+                              } 
+                              else if (_factor < 0 
+                                && _viewIndex < snapshot.data.length - 1) {
+                                  _factor += 1;
+                                  _viewIndex++;
+                              }
+                              _scroller.jumpTo(0);
+                            }
+                          });
+                          runAnimation();
 
-                // By default, show a loading spinner.
-                return CircularProgressIndicator();
-              }),
+                          if (!_loading && _viewIndex > snapshot.data.length - 3) {
+                            _texts = fetchTexts(prevFuture: _texts);
+                          }
+                        },
+                        child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Transform(
+                                transform: Matrix4.identity()
+                                  ..translate(_factor * screenSize.width)
+                                  ..setEntry(3, 2, 0.001)
+                                  ..rotateY(0 - math.pi / 2 * _factor / 4)
+                                  ,
+                                alignment: _factor >= 0 ? Alignment.centerLeft : Alignment.centerRight,
+                                child: SingleChildScrollView(
+                                    controller: _scroller,
+                                    child: getContent(snapshot.data, _viewIndex, screenSize)),
+                              ),
+                              Transform(
+                                transform: Matrix4.identity()
+                                  ..translate((_factor + 1) * MediaQuery.of(context).size.width)
+                                  ..setEntry(3, 2, -0.001)
+                                  ..rotateY(math.pi / 8 + math.pi / 2 * _factor / 4),
+                                alignment: Alignment.centerLeft,
+                                child: SingleChildScrollView(
+                                  child: getContent(snapshot.data, _viewIndex + 1, screenSize)
+                                  )
+                              ),
+                              Transform(
+                                transform: Matrix4.identity()
+                                  ..translate((_factor - 1)* MediaQuery.of(context).size.width)
+                                  ..setEntry(3, 2, 0.001)
+                                  ..rotateY(math.pi / 8 - math.pi / 2 * _factor / 4),
+                                alignment: Alignment.centerRight,
+                                child: SingleChildScrollView(
+                                  child: getContent(snapshot.data, _viewIndex - 1, screenSize)
+                                  )
+                              ),
+                            ]
+                        )
+                        // child: Stack(children: [
+                        //   Transform.translate(
+                        //     offset: Offset(_factor, 0),
+                        //     child: SingleChildScrollView(
+                        //         controller: _scroller,
+                        //         child: getContent(snapshot.data, _viewIndex)),
+                        //   ),
+                        //   Transform.translate(
+                        //       offset: Offset(
+                        //           _factor + MediaQuery.of(context).size.width,
+                        //           0),
+                        //       child: getContent(snapshot.data, _viewIndex + 1)),
+                        //   Transform.translate(
+                        //       offset: Offset(
+                        //           _factor - MediaQuery.of(context).size.width,
+                        //           0),
+                        //       child: getContent(snapshot.data, _viewIndex - 1)),
+                        //   //createSuggestionWidget()
+                        // ])
+                        );
+                  } else if (snapshot.hasError) {
+                    return Text("${snapshot.error}");
+                  }
+
+                  // By default, show a loading spinner.
+                  return CircularProgressIndicator();
+                }),
+          ),
         ),
         floatingActionButton: FloatingActionButton(
-          onPressed: _refresh,
+          onPressed: refresh,
           tooltip: 'Refresh',
           child: Icon(Icons.refresh),
         ));
@@ -337,20 +402,50 @@ class _MyHomePageState extends State<MyHomePage>
     );
   }
 
-  Widget getContent(List<Post> data, int index) {
+  Widget getContent(List<Post> data, int index, Size screenSize) {
     if (index < 0 || index >= data.length) return null;
 
-    return ConstrainedBox(
-      constraints:
-          BoxConstraints(minHeight: MediaQuery.of(context).size.height),
-      child: Container(
-          //color: Colors.white,
-          child: Padding(
+    var textStyle = GoogleFonts.openSans(fontSize: 16 * _scale);
+    var post = data[index];
+    return Container(
         padding: EdgeInsets.fromLTRB(10, 0, 10, 20),
-        child: Text(
-            'Опубликовано: ' + data[index].date + '\n\n' + data[index].content,
-            style: GoogleFonts.openSans(fontSize: 16 * _scale)),
-      )),
-    );
+        child: Column(
+          children: <Widget>[
+            Text('Опубликовано: ${post.date}\n', style: textStyle),
+            Text(post.content, style: textStyle, textAlign: TextAlign.justify,),
+            if (post.id != null) RaisedButton(
+              child: Text('Открыть пост VK'), 
+              color: Colors.lightBlue,
+              textColor: Colors.white,
+              onPressed: () async {
+                var url = "https://vk.com/wall${post.id}";
+                if (await canLaunch(url)) {
+                  await launch(url);
+                } else {
+                  throw 'Could not launch $url';
+                }
+              },)
+            // Row(children: <Widget>[
+            //   Icon(Icons.thumb_up),
+            //   Text(post.likesCount)
+            // ]),
+            // ListView(children:
+            //   post.replies.map((reply) =>
+            //     ListTile(
+            //      // leading: Image.network(reply.img),
+            //       leading: Icon(Icons.reorder),
+            //       title: Text(reply.name)
+            //     )
+            //   ).toList()
+            // )
+          ],
+        ),
+      );
+  }
+}
+
+extension Func on Object {
+  K map<T, K>(K Function(T) mapper) {
+    return this == null ? null : mapper(this);
   }
 }
