@@ -1,16 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:html/parser.dart' show parse;
 import 'package:http/http.dart' as http;
 import 'package:html/dom.dart' as DOM;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:convert' show json;
 import 'decoder.dart' show decodeCp1251;
 import 'dart:math' as math;
 
 void main() {
+    
+  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.dark,
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark 
+  ));
+
   runApp(MyApp());
 }
 
@@ -18,6 +28,7 @@ class Reply {
   String img;
   String name;
   String content;
+  String date;
 }
 
 class Post {
@@ -32,23 +43,22 @@ class Post {
 }
 
 class MyApp extends StatelessWidget {
+  
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Ванильный еретик',
+      title: 'Ванильный Еретик',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: MyHomePage(title: 'Ванильный еретик'),
+      home: MyHomePage(),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  MyHomePage({Key key, this.title}) : super(key: key);
-
-  final String title;
+  MyHomePage({Key key}) : super(key: key);
 
   @override
   MyHomePageState createState() => MyHomePageState();
@@ -171,7 +181,7 @@ class MyHomePageState extends State<MyHomePage>
                 ..date = post.querySelector('.rel_date')?.innerHtml
                 ..likesCount = post.querySelector('.like_button_count')?.innerHtml
                 ..html = post.querySelector('.wall_post_text')
-                ..repliesHtml = post.querySelectorAll('.replies')
+                ..repliesHtml = post.querySelectorAll('.reply')
             )
             .where((post) => (post.html?.innerHtml?.length ?? 0) > minTextLength)
             .map((post) {
@@ -179,15 +189,18 @@ class MyHomePageState extends State<MyHomePage>
                 element.remove();
               });
               post.content =
-                  removeAllHtmlTags(post.html.innerHtml.replaceAll('<br>', '\n'));
-                  //.substring(0, 100);
+                  removeAllHtmlTags(post.html.innerHtml);
               post.replies = post.repliesHtml
-                .where((reply) => reply.querySelector('img') != null)
                 .map((reply) => Reply()
                   ..img = reply.querySelector('.reply_img')?.attributes['src']
                   ..name = reply.querySelector('.author')?.innerHtml
-                  ..content = reply.querySelector('.wall_reply_text')?.innerHtml
+                  ..content = 
+                    removeAllHtmlTags(reply.querySelector('.wall_reply_text')?.innerHtml)
+                  ..date = 
+                    removeAllHtmlTags(reply.querySelector('.reply_date')?.innerHtml)
+                    .trim()
                 )
+                .where((reply) => reply.content != null && reply.content.length > 0)
                 .toList();
               return post;
             })
@@ -203,9 +216,11 @@ class MyHomePageState extends State<MyHomePage>
   }
 
   String removeAllHtmlTags(String htmlText) {
+    if(htmlText == null) return null;
+
     RegExp exp = RegExp(r"<[^>]*>", multiLine: true, caseSensitive: true);
 
-    return htmlText.replaceAll(exp, '');
+    return htmlText.replaceAll('<br>', '\n').replaceAll(exp, '');
   }
 
   void refresh() {
@@ -218,20 +233,13 @@ class MyHomePageState extends State<MyHomePage>
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-        //appBar: AppBar(title: Text(widget.title)),
         body: SafeArea(
           child: Center(
             child: FutureBuilder<List<Post>>(
                 future: _texts,
                 builder: (context, snapshot) {
-                  if (snapshot.hasData) {
+                  if ((!_loading || _viewIndex != 0) && snapshot.hasData) {
                     var screenSize = MediaQuery.of(context).size;
                     return GestureDetector(
                         onScaleStart: (ScaleStartDetails details) {
@@ -301,7 +309,7 @@ class MyHomePageState extends State<MyHomePage>
                                     controller: _scroller,
                                     child: getContent(snapshot.data, _viewIndex, screenSize)),
                               ),
-                              Transform(
+                              if (_factor < -0.0001) Transform(
                                 transform: Matrix4.identity()
                                   ..translate((_factor + 1) * MediaQuery.of(context).size.width)
                                   ..setEntry(3, 2, -0.001)
@@ -311,7 +319,7 @@ class MyHomePageState extends State<MyHomePage>
                                   child: getContent(snapshot.data, _viewIndex + 1, screenSize)
                                   )
                               ),
-                              Transform(
+                              if (_factor > 0.0001) Transform(
                                 transform: Matrix4.identity()
                                   ..translate((_factor - 1)* MediaQuery.of(context).size.width)
                                   ..setEntry(3, 2, 0.001)
@@ -373,7 +381,7 @@ class MyHomePageState extends State<MyHomePage>
               children: <Widget>[
                 Text("Свайпай чтобы листать", style: TextStyle(fontSize: fontSize)),
                 Padding(
-                    padding: EdgeInsets.all(30),
+                    padding: const EdgeInsets.all(30),
                     child: Image.asset(
                       'images/suggestion_swipe.png',
                       height: 70,
@@ -381,7 +389,7 @@ class MyHomePageState extends State<MyHomePage>
                 Text("Текст можно растягивать",
                     style: TextStyle(fontSize: fontSize)),
                 Padding(
-                    padding: EdgeInsets.all(30),
+                    padding: const EdgeInsets.all(30),
                     child: Image.asset(
                       'images/suggestion_pinch.png',
                       height: 70,
@@ -408,40 +416,89 @@ class MyHomePageState extends State<MyHomePage>
     var textStyle = GoogleFonts.openSans(fontSize: 16 * _scale);
     var post = data[index];
     return Container(
-        padding: EdgeInsets.fromLTRB(10, 0, 10, 20),
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 20),
         child: Column(
           children: <Widget>[
             Text('Опубликовано: ${post.date}\n', style: textStyle),
-            Text(post.content, style: textStyle, textAlign: TextAlign.justify,),
-            if (post.id != null) RaisedButton(
-              child: Text('Открыть пост VK'), 
-              color: Colors.lightBlue,
-              textColor: Colors.white,
-              onPressed: () async {
-                var url = "https://vk.com/wall${post.id}";
-                if (await canLaunch(url)) {
-                  await launch(url);
-                } else {
-                  throw 'Could not launch $url';
-                }
-              },)
-            // Row(children: <Widget>[
-            //   Icon(Icons.thumb_up),
-            //   Text(post.likesCount)
-            // ]),
-            // ListView(children:
-            //   post.replies.map((reply) =>
-            //     ListTile(
-            //      // leading: Image.network(reply.img),
-            //       leading: Icon(Icons.reorder),
-            //       title: Text(reply.name)
-            //     )
-            //   ).toList()
-            // )
-          ],
-        ),
-      );
-  }
+            Text(post.content, style: textStyle, textAlign: TextAlign.justify),
+            if (post.id != null) Container(
+              padding: const EdgeInsets.all(20),
+              child: RaisedButton(
+                child: Text('Открыть пост VK'), 
+                color: Colors.lightBlue,
+                textColor: Colors.white,
+                onPressed: () async {
+                  var url = "https://vk.com/wall${post.id}";
+                  if (await canLaunch(url)) {
+                    await launch(url);
+                  } else {
+                    throw 'Could not launch $url';
+                  }
+                },),
+            ),
+            if(post.replies.length > 0) 
+              ...getReplies(post)
+              // Row(children: <Widget>[
+              //   Icon(Icons.thumb_up),
+              //   Text(post.likesCount)
+              // ]),
+              // ListView(children:
+              //   post.replies.map((reply) =>
+              //     ListTile(
+              //      // leading: Image.network(reply.img),
+              //       leading: Icon(Icons.reorder),
+              //       title: Text(reply.name)
+              //     )
+              //   ).toList()
+              // )
+            ],
+          ),
+        );
+    }
+  
+    Iterable<Widget> getReplies(Post post) 
+    {
+      final double avatarSize = 32;
+      return post.replies.map((reply) 
+        => Container(
+          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Container(
+                padding: const EdgeInsets.only(right: 10),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(avatarSize),
+                  child: CachedNetworkImage(
+                    width: avatarSize,
+                    height: avatarSize,
+                    placeholder: (context, url) => Container(
+                      width: avatarSize,
+                      height: avatarSize,
+                      child: CircularProgressIndicator()),
+                    imageUrl: reply.img,
+                  ),
+                ),
+              ),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(reply.name ?? '', 
+                      style: const TextStyle(color: Colors.blue)),
+                    Text(reply.date ?? '',
+                      style: const TextStyle(color: Colors.grey)),
+                    Text(reply.content ?? '', 
+                      style: TextStyle(fontSize: 16 * _scale)),
+                  ],
+                )
+              ),
+            ],
+          )
+          )
+        );
+    }
 }
 
 extension Func on Object {
