@@ -29,6 +29,7 @@ class Reply {
   String name;
   String content;
   String date;
+  String authorUrl;
 }
 
 class Post {
@@ -212,6 +213,7 @@ class MyHomePageState extends State<MyHomePage>
   List<Reply> getReplies(List<DOM.Element> payload) 
       => payload.map((reply) => Reply()
             ..img = reply.querySelector('.reply_img')?.attributes['src']
+            ..authorUrl = reply.querySelector('.reply_image')?.attributes['href']
             ..name = reply.querySelector('.author')?.innerHtml
             ..content = 
               removeAllHtmlTags(reply.querySelector('.wall_reply_text')?.innerHtml)
@@ -452,14 +454,7 @@ class MyHomePageState extends State<MyHomePage>
                 child: Text('Открыть пост VK'), 
                 color: Colors.lightBlue,
                 textColor: Colors.white,
-                onPressed: () async {
-                  var url = "https://vk.com/wall${post.id}";
-                  if (await canLaunch(url)) {
-                    await launch(url);
-                  } else {
-                    throw 'Could not launch $url';
-                  }
-                },),
+                onPressed: () => gotoPost(post)),
             ),
             if(post.replies.length > 0) 
               ...getWidgetReplies(post),
@@ -493,18 +488,21 @@ class MyHomePageState extends State<MyHomePage>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Container(
-                padding: const EdgeInsets.only(right: 10),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(avatarSize),
-                  child: CachedNetworkImage(
-                    width: avatarSize,
-                    height: avatarSize,
-                    placeholder: (context, url) => Container(
+              InkWell(
+                onTap: () => gotoAuthor(reply),
+                child: Container(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(avatarSize),
+                    child: CachedNetworkImage(
                       width: avatarSize,
                       height: avatarSize,
-                      child: CircularProgressIndicator()),
-                    imageUrl: reply.img,
+                      placeholder: (context, url) => Container(
+                        width: avatarSize,
+                        height: avatarSize,
+                        child: CircularProgressIndicator()),
+                      imageUrl: reply.img,
+                    ),
                   ),
                 ),
               ),
@@ -512,8 +510,11 @@ class MyHomePageState extends State<MyHomePage>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text(reply.name ?? '', 
-                      style: TextStyle(color: Colors.blue, fontSize: 16 * _scale)
+                    InkWell(
+                      onTap: () => gotoAuthor(reply),
+                      child: Text(reply.name ?? '', 
+                        style: TextStyle(color: Colors.blue, fontSize: 16 * _scale)
+                      ),
                     ),
                     Text(reply.date ?? '',
                       style: TextStyle(color: Colors.grey, fontSize: 16 * _scale)
@@ -528,6 +529,24 @@ class MyHomePageState extends State<MyHomePage>
           )
           )
         );
+    }
+
+    void gotoPost(Post post) async {
+      var url = "https://vk.com/wall${post.id}";
+      if (await canLaunch(url)) {
+        await launch(url);
+      } else {
+        throw 'Could not launch $url';
+      }
+    }
+
+    void gotoAuthor(Reply reply) async {
+      var url = "https://vk.com${reply.authorUrl}";
+      if (await canLaunch(url)) {
+        await launch(url);
+      } else {
+        throw 'Could not launch $url';
+      }
     }
 }
 
