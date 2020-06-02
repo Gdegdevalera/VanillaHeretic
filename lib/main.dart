@@ -257,9 +257,13 @@ class MyHomePageState extends State<MyHomePage>
   String removeAllHtmlTags(String htmlText) {
     if(htmlText == null) return null;
 
-    RegExp exp = RegExp(r"<[^>]*>", multiLine: true, caseSensitive: true);
+    var exp = RegExp(r"<[^>]*>", multiLine: true, caseSensitive: true);
+    var emoji = RegExp(r'<img .*emoji.* alt="(.*)">');
 
-    return htmlText.replaceAll('<br>', '\n').replaceAll(exp, '');
+    return htmlText
+      .replaceAll('<br>', '\n')
+      .replaceAllMapped(emoji, (match) => match.group(1))
+      .replaceAll(exp, '');
   }
 
   void refresh() {
@@ -509,11 +513,14 @@ class MyHomePageState extends State<MyHomePage>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(reply.name ?? '', 
-                      style: const TextStyle(color: Colors.blue)),
+                      style: TextStyle(color: Colors.blue, fontSize: 16 * _scale)
+                    ),
                     Text(reply.date ?? '',
-                      style: const TextStyle(color: Colors.grey)),
+                      style: TextStyle(color: Colors.grey, fontSize: 16 * _scale)
+                    ),
                     Text(reply.content ?? '', 
-                      style: TextStyle(fontSize: 16 * _scale)),
+                      style: TextStyle(fontSize: 16 * _scale)
+                    ),
                   ],
                 )
               ),
