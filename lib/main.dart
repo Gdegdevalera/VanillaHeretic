@@ -78,6 +78,7 @@ class MyHomePageState extends State<MyHomePage>
 
   Future<List<Post>> _texts;
   bool _loading = false;
+  bool _commentsLoading = false;
   int _viewIndex = 0;
   int _totalIndex = 0;
   double _scale = 1.0;
@@ -222,6 +223,11 @@ class MyHomePageState extends State<MyHomePage>
           .toList();
 
   void loadMoreComments(Post post) async {
+    setState(() {
+      post.hasMoreComments = false;
+      _commentsLoading = true;
+    });
+
     final itemId = post.id.substring(ownerId.length + 1);
     try {
       final response = await http.post('https://vk.com/al_wall.php', body: {
@@ -239,7 +245,7 @@ class MyHomePageState extends State<MyHomePage>
         
         setState(() {
           post.replies = getReplies(document.querySelectorAll('.reply'));
-          post.hasMoreComments = false;
+          _commentsLoading = false;
         }); 
       }
     } 
@@ -364,26 +370,7 @@ class MyHomePageState extends State<MyHomePage>
                               ),
                             ]
                         )
-                        // child: Stack(children: [
-                        //   Transform.translate(
-                        //     offset: Offset(_factor, 0),
-                        //     child: SingleChildScrollView(
-                        //         controller: _scroller,
-                        //         child: getContent(snapshot.data, _viewIndex)),
-                        //   ),
-                        //   Transform.translate(
-                        //       offset: Offset(
-                        //           _factor + MediaQuery.of(context).size.width,
-                        //           0),
-                        //       child: getContent(snapshot.data, _viewIndex + 1)),
-                        //   Transform.translate(
-                        //       offset: Offset(
-                        //           _factor - MediaQuery.of(context).size.width,
-                        //           0),
-                        //       child: getContent(snapshot.data, _viewIndex - 1)),
-                        //   //createSuggestionWidget()
-                        // ])
-                        );
+                      );
                   } else if (snapshot.hasError) {
                     return Text("${snapshot.error}");
                   }
@@ -397,7 +384,8 @@ class MyHomePageState extends State<MyHomePage>
           onPressed: refresh,
           tooltip: 'Refresh',
           child: Icon(Icons.refresh),
-        ));
+        )
+      );
   }
 
   Future<void> _showOnboarding() async {
@@ -449,11 +437,11 @@ class MyHomePageState extends State<MyHomePage>
     var textStyle = GoogleFonts.openSans(fontSize: 16 * _scale);
     var post = data[index];
     return Container(
-        padding: const EdgeInsets.fromLTRB(10, 0, 10, 20),
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 300),
         child: Column(
           children: <Widget>[
             Text('Опубликовано: ${post.date}\n', style: textStyle),
-            Text(post.content.substring(0, 100), style: textStyle, textAlign: TextAlign.justify),
+            Text(post.content, style: textStyle, textAlign: TextAlign.justify),
             if (post.id != null) Container(
               padding: const EdgeInsets.all(20),
               child: RaisedButton(
@@ -471,7 +459,12 @@ class MyHomePageState extends State<MyHomePage>
             ),
             if(post.replies.length > 0) 
               ...getWidgetReplies(post),
-            if(post.hasMoreComments) 
+            if(_commentsLoading)
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: CircularProgressIndicator(),
+              ),
+            if(post.hasMoreComments)
               FlatButton(
                 onPressed: () {
                   loadMoreComments(post);
@@ -481,22 +474,9 @@ class MyHomePageState extends State<MyHomePage>
                     color: Colors.lightBlue)
                   )
               )
-              // Row(children: <Widget>[
-              //   Icon(Icons.thumb_up),
-              //   Text(post.likesCount)
-              // ]),
-              // ListView(children:
-              //   post.replies.map((reply) =>
-              //     ListTile(
-              //      // leading: Image.network(reply.img),
-              //       leading: Icon(Icons.reorder),
-              //       title: Text(reply.name)
-              //     )
-              //   ).toList()
-              // )
-            ],
-          ),
-        );
+          ],
+        ),
+      );
     }
   
     Iterable<Widget> getWidgetReplies(Post post) 
