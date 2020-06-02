@@ -37,6 +37,7 @@ class Post {
   String content;
   String likesCount;
   List<Reply> replies;
+  bool hasMoreComments;
   
   DOM.Element html;
   List<DOM.Element> repliesHtml;
@@ -67,6 +68,7 @@ class MyHomePage extends StatefulWidget {
 class MyHomePageState extends State<MyHomePage>
   with SingleTickerProviderStateMixin {
 
+  final ownerId = '-61574859'; // vk public id
   final minTextLength = 1000;
   final minScale = 0.5;
   final maxScale = 1.5;
@@ -164,7 +166,7 @@ class MyHomePageState extends State<MyHomePage>
     try {
       final response = await http.post('https://vk.com/al_wall.php', body: {
         'act': 'get_wall',
-        'owner_id': '-61574859',
+        'owner_id': ownerId,
         'wall_start_from': startFrom.toString(),
         'al': '1'
       });
@@ -182,6 +184,7 @@ class MyHomePageState extends State<MyHomePage>
                 ..likesCount = post.querySelector('.like_button_count')?.innerHtml
                 ..html = post.querySelector('.wall_post_text')
                 ..repliesHtml = post.querySelectorAll('.reply')
+                ..hasMoreComments = post.querySelector('.replies_next') != null
             )
             .where((post) => (post.html?.innerHtml?.length ?? 0) > minTextLength)
             .map((post) {
@@ -190,18 +193,8 @@ class MyHomePageState extends State<MyHomePage>
               });
               post.content =
                   removeAllHtmlTags(post.html.innerHtml);
-              post.replies = post.repliesHtml
-                .map((reply) => Reply()
-                  ..img = reply.querySelector('.reply_img')?.attributes['src']
-                  ..name = reply.querySelector('.author')?.innerHtml
-                  ..content = 
-                    removeAllHtmlTags(reply.querySelector('.wall_reply_text')?.innerHtml)
-                  ..date = 
-                    removeAllHtmlTags(reply.querySelector('.reply_date')?.innerHtml)
-                    .trim()
-                )
-                .where((reply) => reply.content != null && reply.content.length > 0)
-                .toList();
+              post.replies = getReplies(post.repliesHtml);
+                
               return post;
             })
             .toList();
@@ -210,6 +203,46 @@ class MyHomePageState extends State<MyHomePage>
         return new List<Post>();
       }
     }
+    catch(e) {
+      throw Exception("Ошибка. Проверьте соединение с Интернет");
+    }
+  }
+
+  List<Reply> getReplies(List<DOM.Element> payload) 
+      => payload.map((reply) => Reply()
+            ..img = reply.querySelector('.reply_img')?.attributes['src']
+            ..name = reply.querySelector('.author')?.innerHtml
+            ..content = 
+              removeAllHtmlTags(reply.querySelector('.wall_reply_text')?.innerHtml)
+            ..date = 
+              removeAllHtmlTags(reply.querySelector('.reply_date')?.innerHtml)
+              .trim()
+          )
+          .where((reply) => reply.content != null && reply.content.length > 0)
+          .toList();
+
+  void loadMoreComments(Post post) async {
+    final itemId = post.id.substring(ownerId.length + 1);
+    try {
+      final response = await http.post('https://vk.com/al_wall.php', body: {
+        'act': 'get_post_replies',
+        'owner_id': ownerId,
+        'item_id': itemId,
+        'order': 'desc',
+        'al': '1'
+      });
+
+      if (response.statusCode == 200) {
+        var jsonResponse = json.decode(response.body.substring(4));
+        var payload = jsonResponse['payload'][1][0].toString();
+        var document = parse(decodeCp1251(payload));
+        
+        setState(() {
+          post.replies = getReplies(document.querySelectorAll('.reply'));
+          post.hasMoreComments = false;
+        }); 
+      }
+    } 
     catch(e) {
       throw Exception("Ошибка. Проверьте соединение с Интернет");
     }
@@ -420,7 +453,7 @@ class MyHomePageState extends State<MyHomePage>
         child: Column(
           children: <Widget>[
             Text('Опубликовано: ${post.date}\n', style: textStyle),
-            Text(post.content, style: textStyle, textAlign: TextAlign.justify),
+            Text(post.content.substring(0, 100), style: textStyle, textAlign: TextAlign.justify),
             if (post.id != null) Container(
               padding: const EdgeInsets.all(20),
               child: RaisedButton(
@@ -437,7 +470,17 @@ class MyHomePageState extends State<MyHomePage>
                 },),
             ),
             if(post.replies.length > 0) 
-              ...getReplies(post)
+              ...getWidgetReplies(post),
+            if(post.hasMoreComments) 
+              FlatButton(
+                onPressed: () {
+                  loadMoreComments(post);
+                },
+                child: Text('Еще комментарии...', 
+                  style: const TextStyle(
+                    color: Colors.lightBlue)
+                  )
+              )
               // Row(children: <Widget>[
               //   Icon(Icons.thumb_up),
               //   Text(post.likesCount)
@@ -456,7 +499,7 @@ class MyHomePageState extends State<MyHomePage>
         );
     }
   
-    Iterable<Widget> getReplies(Post post) 
+    Iterable<Widget> getWidgetReplies(Post post) 
     {
       final double avatarSize = 32;
       return post.replies.map((reply) 
