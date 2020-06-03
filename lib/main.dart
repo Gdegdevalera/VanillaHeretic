@@ -53,7 +53,6 @@ class MyHomePageState extends State<MyHomePage>
 
   final _scroller = ScrollController();
   AnimationController _animationController;
-  TextEditingController _replyController = TextEditingController();
   int _updateFactor = 0;
 
   String _vkToken;
@@ -68,6 +67,9 @@ class MyHomePageState extends State<MyHomePage>
   double _previousScale;
   double _factor = 0.0;
   Animation<double> _animation;
+  
+  TextEditingController _replyController = TextEditingController();
+  String _replyToCommentId;
 
   @override
   void initState() {
@@ -158,24 +160,30 @@ class MyHomePageState extends State<MyHomePage>
     });
   }
 
-  Future<void> loadMoreComments(Post post) async {
+  Future<void> loadComments(Post post) async {
     setState(() {
-      post.hasMoreComments = false;
       _commentsLoading = true;
     });
 
     final replies = await VkApi.loadComments(post);
-
-    setState(() {
-      post.replies = replies;
-      _commentsLoading = false;
-    }); 
+    if(replies == null)
+    {
+      setState(() {
+        _commentsLoading = false;
+      }); 
+    } else {
+      setState(() {
+        post.replies = replies;
+        _commentsLoading = false;
+      }); 
+    }
   }
 
   void refresh() {
     setState(() {
       _viewIndex = 0;
       _totalIndex = 0;
+      _replyToCommentId = null;
       _texts = fetchTexts();
     });
   }
@@ -239,6 +247,7 @@ class MyHomePageState extends State<MyHomePage>
                             }
                           });
                           _replyController.clear();
+                          _replyToCommentId = null;
                           runAnimation();
 
                           if (!_loading && _viewIndex > snapshot.data.length - 3) {
@@ -354,10 +363,7 @@ class MyHomePageState extends State<MyHomePage>
         child: Column(
           children: <Widget>[
             Text('Опубликовано: ${post.date}\n', style: textStyle),
-            Text(post.content
-            
-            .substring(0,100)
-            , style: textStyle, textAlign: TextAlign.justify),
+            Text(post.content, style: textStyle, textAlign: TextAlign.justify),
             if (post.id != null) Container(
               padding: const EdgeInsets.all(20),
               child: RaisedButton(
@@ -366,43 +372,33 @@ class MyHomePageState extends State<MyHomePage>
                 textColor: Colors.white,
                 onPressed: () => gotoPost(post)),
             ),
+            if(_replyToCommentId != null)
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: InkWell(
+                  onTap: () => setState(() { _replyToCommentId = null; }),
+                  child: Text('Ответить на пост', 
+                    style: TextStyle(
+                      color: Colors.lightBlue,
+                      fontSize: 16 * _scale)
+                    ),
+                ),
+              ),
+            if(_replyToCommentId == null)
+              replyInputText(post),
             if(post.replies.length > 0) 
-              ...getWidgetReplies(post),
+              ...getWidgetReplies(post, post.replies),
             if(_commentsLoading)
               Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: CircularProgressIndicator(),
               ),
-            Container(
-              padding: const EdgeInsets.all(5.0),
-              child: Row(
-              children: <Widget>[
-                if(_avatarUrl != null) 
-                  getAvatarWidget(_avatarUrl),
-                Flexible(
-                  child: TextField(
-                      controller: _replyController,
-                      onSubmitted: (s) => replyTo(post, _replyController.text),
-                      onTap: () => ensureUserLoggedIn(),
-                      style: TextStyle(fontSize: 16 * _scale),
-                      decoration: InputDecoration(
-                        hintText: 'Комментировать...',
-                        suffixIcon: IconButton(
-                          icon: Icon(Icons.send, color: Colors.lightBlue),
-                          onPressed: () => replyTo(post, _replyController.text),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if(post.hasMoreComments)
+            if(post.replies.length == 0 && post.repliesCount > post.replies.length && !_commentsLoading)
               FlatButton(
                 onPressed: () {
-                  loadMoreComments(post);
+                  loadComments(post);
                 },
-                child: Text('Еще комментарии...', 
+                child: Text('Показать комментарии (${post.repliesCount})', 
                   style: TextStyle(
                     color: Colors.lightBlue,
                     fontSize: 16 * _scale)
@@ -412,62 +408,109 @@ class MyHomePageState extends State<MyHomePage>
         ),
       );
     }
+
+  Widget replyInputText(Post post) 
+    => Container(
+      padding: const EdgeInsets.all(5.0),
+      child: Row(
+      children: <Widget>[
+        if(_avatarUrl != null) 
+          getAvatarWidget(_avatarUrl),
+        Flexible(
+          child: TextField(
+              controller: _replyController,
+              onSubmitted: (s) => replyTo(post, _replyController.text),
+              onTap: () => ensureUserLoggedIn(),
+              style: TextStyle(fontSize: 16 * _scale),
+              decoration: InputDecoration(
+                hintText: 'Комментировать...',
+                suffixIcon: IconButton(
+                  icon: Icon(Icons.send, color: Colors.lightBlue),
+                  onPressed: () => replyTo(post, _replyController.text),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   
-    Iterable<Widget> getWidgetReplies(Post post) 
-    {
-      return post.replies.map((reply) 
-        => Container(
-          alignment: Alignment.centerLeft,
-          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              InkWell(
-                onTap: () => gotoAuthor(reply),
-                child: getAvatarWidget(reply.img),
-              ),
-              Flexible(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    InkWell(
-                      onTap: () => gotoAuthor(reply),
-                      child: Text(reply.name ?? '', 
-                        style: TextStyle(color: Colors.blue, fontSize: 16 * _scale)
+  Iterable<Widget> getWidgetReplies(Post post, List<Reply> replies) 
+  {
+    return replies.map((reply) 
+      => Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            InkWell(
+              onTap: () => gotoAuthor(reply),
+              child: getAvatarWidget(reply.profile.img),
+            ),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  InkWell(
+                    onTap: () => gotoAuthor(reply),
+                    child: Text(reply.profile.name, 
+                      style: TextStyle(color: Colors.blue, fontSize: 16 * _scale)
+                    ),
+                  ),
+                  Text(reply.content, 
+                    style: TextStyle(fontSize: 16 * _scale)
+                  ),
+                  Row(
+                    children: <Widget>[
+                      Text(reply.date,
+                        style: TextStyle(color: Colors.grey, fontSize: 16 * _scale)
                       ),
-                    ),
-                    Text(reply.date ?? '',
-                      style: TextStyle(color: Colors.grey, fontSize: 16 * _scale)
-                    ),
-                    Text(reply.content ?? '', 
-                      style: TextStyle(fontSize: 16 * _scale)
-                    ),
-                  ],
-                )
-              ),
-            ],
-          )
-          )
-        );
+                      if(_replyToCommentId != reply.id)
+                        InkWell(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
+                            child: Text('Ответить',
+                              style: TextStyle(color: Colors.lightBlue, fontSize: 16 * _scale)
+                            ),
+                          ),
+                          onTap: () {
+                            setState(() {
+                              _replyToCommentId = reply.id;
+                            });
+                          },
+                        )
+                    ],
+                  ),
+                  if(_replyToCommentId == reply.id)
+                    replyInputText(post),
+                  if(reply.thread != null)
+                    ...getWidgetReplies(post, reply.thread)
+                ],
+              )
+            ),
+          ],
+        )
+        )
+      );
     }
 
-    Container getAvatarWidget(String url) {
-      return Container(
-                padding: const EdgeInsets.only(right: 10),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(avatarSize),
-                  child: CachedNetworkImage(
-                    width: avatarSize,
-                    height: avatarSize,
-                    placeholder: (context, url) => Container(
-                      width: avatarSize,
-                      height: avatarSize,
-                      child: CircularProgressIndicator()),
-                    imageUrl: url,
-                  ),
-                ),
-              );
-    }
+    Container getAvatarWidget(String url) 
+      => Container(
+          padding: const EdgeInsets.only(right: 10),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(avatarSize),
+            child: CachedNetworkImage(
+              width: avatarSize,
+              height: avatarSize,
+              placeholder: (context, url) => Container(
+                width: avatarSize,
+                height: avatarSize,
+                child: CircularProgressIndicator()),
+              imageUrl: url,
+            ),
+          ),
+        );
 
     void gotoPost(Post post) async {
       var url = "https://vk.com/wall${VkApi.ownerId}_${post.id}";
@@ -479,7 +522,7 @@ class MyHomePageState extends State<MyHomePage>
     }
 
     void gotoAuthor(Reply reply) async {
-      var url = "https://vk.com${reply.authorUrl}";
+      var url = "https://vk.com/${reply.profile.url}";
       if (await canLaunch(url)) {
         await launch(url);
       } else {
@@ -493,7 +536,7 @@ class MyHomePageState extends State<MyHomePage>
       
      final token = await showDialog<String>(
         context: context,
-        builder: (c) =>  Authoriztion()
+        builder: (c) => Authoriztion()
       );
 
       _vkToken = token;
@@ -520,13 +563,11 @@ class MyHomePageState extends State<MyHomePage>
       if(_vkToken == null)
         return;
 
-      var success = await VkApi.replyTo(post, message, _vkToken);
+      var success = await VkApi.replyTo(post, _replyToCommentId, message, _vkToken);
       if(success) {
         _replyController.clear();
-        loadMoreComments(post);
-      } else {
-        final snackBar = SnackBar(content: Text('Ошибка'));
-        Scaffold.of(context).showSnackBar(snackBar);
+        _replyToCommentId = null;
+        loadComments(post);
       }
     }
 }

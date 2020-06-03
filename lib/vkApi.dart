@@ -1,51 +1,38 @@
-import 'package:html/parser.dart' show parse;
-import 'package:html/dom.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert' show json;
-import 'decoder.dart' show decodeCp1251;
 import 'models.dart';
+import 'package:intl/intl.dart';
 
 class VkApi {
 
+  static const baseUrl = 'https://api.vk.com/method';
+  static const v = 'v=5.92';
+  static const serviceToken = 'access_token=f84f0ca0f84f0ca0f84f0ca0eff83d5229ff84ff84f0ca0a6994f097f9d0eaf132ebce1';
   static const ownerId = '-61574859'; // vk public id
   static const minTextLength = 1000;
 
+  static final dateFormat = DateFormat.MMMd().add_Hm();
+
   static Future<List<Post>> fetch(int startFrom, void Function(int) setTotal) async {
     try {
-      final response = await http.post('https://vk.com/al_wall.php', body: {
-        'act': 'get_wall',
-        'owner_id': ownerId,
-        'wall_start_from': startFrom.toString(),
-        'al': '1'
-      });
-      if (response.statusCode == 200) {
-        var jsonResponse = json.decode(response.body.substring(4));
-        var payload = jsonResponse['payload'][1][0].toString();
-        var document = parse(decodeCp1251(payload));
+      final response = await http.get('$baseUrl/wall.get?owner_id=$ownerId&offset=$startFrom&count=10&$serviceToken&$v');
 
-        var allPosts = document.querySelectorAll('._post_content');
+      if (response.statusCode == 200) {
+        var jsonResponse = json.decode(response.body);
+          
+        List<Post> allPosts = jsonResponse['response']['items']
+          .where((x) => x['post_type'] == 'post')
+          .map<Post>((x) => Post()
+            ..id = x['id'].toString()
+            ..date = dateFormat.format(DateTime.fromMillisecondsSinceEpoch(x['date'] * 1000))
+            ..content = x['text']
+            ..repliesCount = x['comments']['count']
+          )
+          .toList();
+
         setTotal(allPosts.length);
         var posts = allPosts
-            .map((post) => Post()
-                ..id = post.querySelector('.post_img')
-                  .map((x) => x.attributes['data-post-id'].substring(ownerId.length + 1))
-                ..date = post.querySelector('.rel_date')?.innerHtml
-                ..likesCount = post.querySelector('.like_button_count')?.innerHtml
-                ..html = post.querySelector('.wall_post_text')
-                ..repliesHtml = post.querySelectorAll('.reply')
-                ..hasMoreComments = post.querySelector('.replies_next') != null
-            )
-            .where((post) => (post.html?.innerHtml?.length ?? 0) > minTextLength)
-            .map((post) {
-              post.html.querySelectorAll('a').forEach((element) {
-                element.remove();
-              });
-              post.content =
-                  _removeAllHtmlTags(post.html.innerHtml);
-              post.replies = _getReplies(post.repliesHtml);
-                
-              return post;
-            })
+            .where((post) => (post.content?.length ?? 0) > minTextLength)
             .toList();
         return posts;
       } else {
@@ -59,20 +46,43 @@ class VkApi {
 
   static Future<List<Reply>> loadComments(Post post) async {
     try {
-      final response = await http.post('https://vk.com/al_wall.php', body: {
-        'act': 'get_post_replies',
-        'owner_id': ownerId,
-        'item_id': post.id,
-        'order': 'desc',
-        'al': '1'
-      });
+      final response = await http.get('$baseUrl/wall.getComments?'
+        +'owner_id=$ownerId&post_id=${post.id}&sort=desc&$serviceToken&$v'
+        +'&extended=1&lang=ru&thread_items_count=10');
 
       if (response.statusCode == 200) {
-        var jsonResponse = json.decode(response.body.substring(4));
-        var payload = jsonResponse['payload'][1][0].toString();
-        var document = parse(decodeCp1251(payload));
+        var jsonResponse = json.decode(response.body);
+        Map<int, Profile> profiles = Map.fromIterable(
+            jsonResponse['response']['profiles']
+            .map<Profile>((x) => Profile()
+              ..id = x['id']
+              ..name = '${x["first_name"]} ${x["last_name"]}'
+              ..img = x['photo_50']
+              ..url = x['screen_name']
+            ), 
+            key: (x) => x.id, 
+            value: (x) => x);
+
+        List<Reply> replies = jsonResponse['response']['items']
+          .map<Reply>((x) => Reply()
+            ..id = x['id'].toString()
+            ..date = dateFormat.format(DateTime.fromMillisecondsSinceEpoch(x['date'] * 1000))
+            ..content = x['text']
+            ..profile = profiles[x['from_id']]
+            ..threadCount = x['thread']['count']
+            ..thread = x['thread']['items'].map<Reply>((y) => Reply()
+              ..id = y['id'].toString()
+              ..date = dateFormat.format(DateTime.fromMillisecondsSinceEpoch(y['date'] * 1000))
+              ..content = _clearMessage(y['text'])
+              ..profile = profiles[y['from_id']]
+              )
+              .where((y) => !y.content.isEmpty)
+              .toList()
+          )
+          .where((x) => !x.content.isEmpty)
+          .toList();
         
-        return _getReplies(document.querySelectorAll('.reply'));
+        return replies;
       }
     } 
     catch(e) {
@@ -82,15 +92,13 @@ class VkApi {
     return null;
   }
 
-  
-
   static Future<String> getUserAvatarUrl(String token) async {
     if (token == null)
       return null;
 
     try {
-      final response = await http.get('https://api.vk.com/method/'
-        + 'users.get?fields=photo_50&access_token=$token&v=5.92');
+      final response = await http.get(baseUrl
+        + '/users.get?fields=photo_50&access_token=$token&v=5.92');
       
       if (response.statusCode == 200) {
         final jsonResponse = json.decode(response.body);
@@ -106,13 +114,14 @@ class VkApi {
     return null;
   }
 
-  static Future<bool> replyTo(Post post, String message, String token) async {
+  static Future<bool> replyTo(Post post, String replyToComment, String message, String token) async {
     try {
       final response = await http.post('https://api.vk.com/method/'
         + 'wall.createComment?access_token=$token&v=5.92', body: {
           'post_id': post.id,
           'owner_id': ownerId,
-          'message': message
+          'message': message,
+          if (replyToComment != null) 'reply_to_comment': replyToComment
         });
 
       if (response.statusCode == 200) {
@@ -125,36 +134,13 @@ class VkApi {
 
     return false;
   }
+  
+  static String _clearMessage(String message) {
+    if(message == null) return null;
 
-  static List<Reply> _getReplies(List<Element> payload) 
-      => payload.map((reply) => Reply()
-            ..img = reply.querySelector('.reply_img')?.attributes['src']
-            ..authorUrl = reply.querySelector('.reply_image')?.attributes['href']
-            ..name = reply.querySelector('.author')?.innerHtml
-            ..content = 
-              _removeAllHtmlTags(reply.querySelector('.wall_reply_text')?.innerHtml)
-            ..date = 
-              _removeAllHtmlTags(reply.querySelector('.reply_date')?.innerHtml)
-              .trim()
-          )
-          .where((reply) => reply.content != null && reply.content.length > 0)
-          .toList();
+    var targetPerson = RegExp(r'^\[.*\|(.*)\]');
 
-  static String _removeAllHtmlTags(String htmlText) {
-    if(htmlText == null) return null;
-
-    var exp = RegExp(r"<[^>]*>", multiLine: true, caseSensitive: true);
-    var emoji = RegExp(r'<img .*emoji.* alt="(.*)">');
-
-    return htmlText
-      .replaceAll('<br>', '\n')
-      .replaceAllMapped(emoji, (match) => match.group(1))
-      .replaceAll(exp, '');
-  }
-}
-
-extension Func on Object {
-  K map<T, K>(K Function(T) mapper) {
-    return this == null ? null : mapper(this);
+    return message
+      .replaceAllMapped(targetPerson, (match) => match.group(1));
   }
 }
