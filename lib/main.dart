@@ -3,15 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:html/parser.dart' show parse;
-import 'package:http/http.dart' as http;
-import 'package:html/dom.dart' as DOM;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'dart:convert' show json;
-import 'decoder.dart' show decodeCp1251;
 import 'dart:math' as math;
+import 'models.dart';
+import 'vkApi.dart';
 
 void main() {
     
@@ -23,26 +20,6 @@ void main() {
   ));
 
   runApp(MyApp());
-}
-
-class Reply {
-  String img;
-  String name;
-  String content;
-  String date;
-  String authorUrl;
-}
-
-class Post {
-  String id;
-  String date;
-  String content;
-  String likesCount;
-  List<Reply> replies;
-  bool hasMoreComments;
-  
-  DOM.Element html;
-  List<DOM.Element> repliesHtml;
 }
 
 class MyApp extends StatelessWidget {
@@ -70,8 +47,6 @@ class MyHomePage extends StatefulWidget {
 class MyHomePageState extends State<MyHomePage>
   with SingleTickerProviderStateMixin {
 
-  final ownerId = '-61574859'; // vk public id
-  final minTextLength = 1000;
   final minScale = 0.5;
   final maxScale = 1.5;
   final double avatarSize = 32;
@@ -127,7 +102,10 @@ class MyHomePageState extends State<MyHomePage>
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _scale = prefs.getDouble('scale') ?? 1.0;
+      _vkToken = prefs.getString('vkToken');
     });
+
+    loadProfile();
 
     final skipOnboarding = prefs.getBool('skipOnboarding') ?? false;  
     if (!skipOnboarding) {
@@ -139,6 +117,7 @@ class MyHomePageState extends State<MyHomePage>
   savePreferences() async {
     final prefs = await SharedPreferences.getInstance();
     prefs.setDouble('scale', _scale);
+    prefs.setString('vkToken', _vkToken);
   }
 
   runAnimation() {
@@ -164,7 +143,7 @@ class MyHomePageState extends State<MyHomePage>
     if (prevFuture == null) prevFuture = Future.value([]);
 
     return prevFuture.then((oldTexts) {
-      return fetch(_totalIndex).then((newTexts) {
+      return VkApi.fetch(_totalIndex, (v) { _totalIndex += v; }).then((newTexts) {
         _loading = false;
         return oldTexts +
           newTexts
@@ -179,108 +158,18 @@ class MyHomePageState extends State<MyHomePage>
     });
   }
 
-  Future<List<Post>> fetch(int startFrom) async {
-    try {
-      final response = await http.post('https://vk.com/al_wall.php', body: {
-        'act': 'get_wall',
-        'owner_id': ownerId,
-        'wall_start_from': startFrom.toString(),
-        'al': '1'
-      });
-      if (response.statusCode == 200) {
-        var jsonResponse = json.decode(response.body.substring(4));
-        var payload = jsonResponse['payload'][1][0].toString();
-        var document = parse(decodeCp1251(payload));
-
-        var allPosts = document.querySelectorAll('._post_content');
-        _totalIndex += allPosts.length;
-        var posts = allPosts
-            .map((post) => Post()
-                ..id = post.querySelector('.post_img')
-                  .map((x) => x.attributes['data-post-id'].substring(ownerId.length + 1))
-                ..date = post.querySelector('.rel_date')?.innerHtml
-                ..likesCount = post.querySelector('.like_button_count')?.innerHtml
-                ..html = post.querySelector('.wall_post_text')
-                ..repliesHtml = post.querySelectorAll('.reply')
-                ..hasMoreComments = post.querySelector('.replies_next') != null
-            )
-            .where((post) => (post.html?.innerHtml?.length ?? 0) > minTextLength)
-            .map((post) {
-              post.html.querySelectorAll('a').forEach((element) {
-                element.remove();
-              });
-              post.content =
-                  removeAllHtmlTags(post.html.innerHtml);
-              post.replies = getReplies(post.repliesHtml);
-                
-              return post;
-            })
-            .toList();
-        return posts;
-      } else {
-        return new List<Post>();
-      }
-    }
-    catch(e) {
-      throw Exception("Ошибка. Проверьте соединение с Интернет");
-    }
-  }
-
-  List<Reply> getReplies(List<DOM.Element> payload) 
-      => payload.map((reply) => Reply()
-            ..img = reply.querySelector('.reply_img')?.attributes['src']
-            ..authorUrl = reply.querySelector('.reply_image')?.attributes['href']
-            ..name = reply.querySelector('.author')?.innerHtml
-            ..content = 
-              removeAllHtmlTags(reply.querySelector('.wall_reply_text')?.innerHtml)
-            ..date = 
-              removeAllHtmlTags(reply.querySelector('.reply_date')?.innerHtml)
-              .trim()
-          )
-          .where((reply) => reply.content != null && reply.content.length > 0)
-          .toList();
-
-  void loadMoreComments(Post post) async {
+  Future<void> loadMoreComments(Post post) async {
     setState(() {
       post.hasMoreComments = false;
       _commentsLoading = true;
     });
 
-    try {
-      final response = await http.post('https://vk.com/al_wall.php', body: {
-        'act': 'get_post_replies',
-        'owner_id': ownerId,
-        'item_id': post.id,
-        'order': 'desc',
-        'al': '1'
-      });
+    final replies = await VkApi.loadComments(post);
 
-      if (response.statusCode == 200) {
-        var jsonResponse = json.decode(response.body.substring(4));
-        var payload = jsonResponse['payload'][1][0].toString();
-        var document = parse(decodeCp1251(payload));
-        
-        setState(() {
-          post.replies = getReplies(document.querySelectorAll('.reply'));
-          _commentsLoading = false;
-        }); 
-      }
-    } 
-    catch(e) {
-      throw Exception("Ошибка. Проверьте соединение с Интернет");
-    }
-  }
-
-  String removeAllHtmlTags(String htmlText) {
-    if(htmlText == null) return null;
-
-    var exp = RegExp(r"<[^>]*>", multiLine: true, caseSensitive: true);
-    var emoji = RegExp(r'<img .*emoji.* alt="(.*)">');
-
-    return htmlText
-      .replaceAll('<br>', '\n')
-      .replaceAllMapped(emoji, (match) => match.group(1))
-      .replaceAll(exp, '');
+    setState(() {
+      post.replies = replies;
+      _commentsLoading = false;
+    }); 
   }
 
   void refresh() {
@@ -494,7 +383,7 @@ class MyHomePageState extends State<MyHomePage>
                   child: TextField(
                       controller: _replyController,
                       onSubmitted: (s) => replyTo(post, _replyController.text),
-                      onTap: () => login(),
+                      onTap: () => ensureUserLoggedIn(),
                       style: TextStyle(fontSize: 16 * _scale),
                       decoration: InputDecoration(
                         hintText: 'Комментировать...',
@@ -581,7 +470,7 @@ class MyHomePageState extends State<MyHomePage>
     }
 
     void gotoPost(Post post) async {
-      var url = "https://vk.com/wall${ownerId}_${post.id}";
+      var url = "https://vk.com/wall${VkApi.ownerId}_${post.id}";
       if (await canLaunch(url)) {
         await launch(url);
       } else {
@@ -598,73 +487,46 @@ class MyHomePageState extends State<MyHomePage>
       }
     }
 
-    void login() async {
+    void ensureUserLoggedIn() async {
       if (_vkToken != null)
         return;
-        
-      final token = await showDialog<String>(
+      
+     final token = await showDialog<String>(
         context: context,
-        builder: (c) => AlertDialog(content: Authoriztion())
+        builder: (c) =>  Authoriztion()
       );
 
       _vkToken = token;
-      try{
-        final avatarUrl = await getAvatarUrl(token);
+      loadProfile();
+      savePreferences();
+    }
 
+    void loadProfile() async {
+      if(_vkToken == null)
+        return;
+
+      final avatarUrl = await VkApi.getUserAvatarUrl(_vkToken);
+      if(avatarUrl != null)
+      {
         setState(() {
           _avatarUrl = avatarUrl;
         });
-      } catch(e) {
-        
+      } else {
+        setState(() { _vkToken = null; });
       }
     }
 
-    Future<String> getAvatarUrl(String token) async {
-      try {
-        final response = await http.get('https://api.vk.com/method/users.get?fields=photo_50&access_token=$token&v=5.92');
-        
-        if (response.statusCode == 200) {
-          var jsonResponse = json.decode(response.body);
-          return jsonResponse['response'][0]['photo_50'].toString();
-        }
+    void replyTo(Post post, String message) async {
+      if(_vkToken == null)
+        return;
 
-        return null;
-      }
-      catch(e) {
-        throw Exception("Ошибка. Проверьте соединение с Интернет");
+      var success = await VkApi.replyTo(post, message, _vkToken);
+      if(success) {
+        _replyController.clear();
+        loadMoreComments(post);
+      } else {
+        final snackBar = SnackBar(content: Text('Ошибка'));
+        Scaffold.of(context).showSnackBar(snackBar);
       }
     }
-
-    void replyTo(Post post, String replyContent) async {
-      print(post.id + _vkToken + replyContent);
-      // try {
-      //   final response = await http.post('https://vk.com/al_wall.php', body: {
-      //     'act': 'get_post_replies',
-      //     'owner_id': ownerId,
-      //     'item_id': post.id,
-      //     'order': 'desc',
-      //     'al': '1'
-      //   });
-
-      //   if (response.statusCode == 200) {
-      //     var jsonResponse = json.decode(response.body.substring(4));
-      //     var payload = jsonResponse['payload'][1][0].toString();
-      //     var document = parse(decodeCp1251(payload));
-          
-      //     setState(() {
-      //       post.replies = getReplies(document.querySelectorAll('.reply'));
-      //       _commentsLoading = false;
-      //     }); 
-      //   }
-      // } 
-      // catch(e) {
-      //   throw Exception("Ошибка. Проверьте соединение с Интернет");
-      // }
-    }
-}
-
-extension Func on Object {
-  K map<T, K>(K Function(T) mapper) {
-    return this == null ? null : mapper(this);
-  }
 }

@@ -19,6 +19,7 @@ class _AuthoriztionState extends State<Authoriztion> {
     flutterWebviewPlugin.onUrlChanged.listen((url) {
       var extractor = RegExp('#access_token=(.*?)&');
       if (extractor.hasMatch(url)) {
+        print(url);
         final token = extractor.allMatches(url).single.group(1);
         Navigator.of(context).pop(token);
       }
@@ -27,6 +28,12 @@ class _AuthoriztionState extends State<Authoriztion> {
 
   @override
   Widget build(BuildContext context) {    
-    return WebviewScaffold(url: authUrl);
+    return SafeArea(
+      child: WebviewScaffold(
+        url: authUrl, 
+        hidden: true,
+        clearCookies: true
+      )
+    );
   }
 }
