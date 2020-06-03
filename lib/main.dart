@@ -1,3 +1,4 @@
+import 'package:VanillaHeretic/authorization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
@@ -73,9 +74,15 @@ class MyHomePageState extends State<MyHomePage>
   final minTextLength = 1000;
   final minScale = 0.5;
   final maxScale = 1.5;
+  final double avatarSize = 32;
+
   final _scroller = ScrollController();
   AnimationController _animationController;
+  TextEditingController _replyController = TextEditingController();
   int _updateFactor = 0;
+
+  String _vkToken;
+  String _avatarUrl;
 
   Future<List<Post>> _texts;
   bool _loading = false;
@@ -100,6 +107,14 @@ class MyHomePageState extends State<MyHomePage>
     });
 
     loadPreferences();
+  }
+
+  Future<String> getToken() async {
+    final token = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => Authoriztion())
+    );
+    return token;
   }
 
   @override
@@ -181,7 +196,8 @@ class MyHomePageState extends State<MyHomePage>
         _totalIndex += allPosts.length;
         var posts = allPosts
             .map((post) => Post()
-                ..id = post.querySelector('.post_img').map((x) => x.attributes['data-post-id'])
+                ..id = post.querySelector('.post_img')
+                  .map((x) => x.attributes['data-post-id'].substring(ownerId.length + 1))
                 ..date = post.querySelector('.rel_date')?.innerHtml
                 ..likesCount = post.querySelector('.like_button_count')?.innerHtml
                 ..html = post.querySelector('.wall_post_text')
@@ -230,12 +246,11 @@ class MyHomePageState extends State<MyHomePage>
       _commentsLoading = true;
     });
 
-    final itemId = post.id.substring(ownerId.length + 1);
     try {
       final response = await http.post('https://vk.com/al_wall.php', body: {
         'act': 'get_post_replies',
         'owner_id': ownerId,
-        'item_id': itemId,
+        'item_id': post.id,
         'order': 'desc',
         'al': '1'
       });
@@ -334,6 +349,7 @@ class MyHomePageState extends State<MyHomePage>
                               _scroller.jumpTo(0);
                             }
                           });
+                          _replyController.clear();
                           runAnimation();
 
                           if (!_loading && _viewIndex > snapshot.data.length - 3) {
@@ -386,11 +402,13 @@ class MyHomePageState extends State<MyHomePage>
                 }),
           ),
         ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: refresh,
-          tooltip: 'Refresh',
-          child: Icon(Icons.refresh),
-        )
+        floatingActionButton: MediaQuery.of(context).viewInsets.bottom != 0 
+          ? null 
+          : FloatingActionButton(
+              onPressed: refresh,
+              tooltip: 'Refresh',
+              child: Icon(Icons.refresh),
+            )
       );
   }
 
@@ -447,7 +465,10 @@ class MyHomePageState extends State<MyHomePage>
         child: Column(
           children: <Widget>[
             Text('Опубликовано: ${post.date}\n', style: textStyle),
-            Text(post.content, style: textStyle, textAlign: TextAlign.justify),
+            Text(post.content
+            
+            .substring(0,100)
+            , style: textStyle, textAlign: TextAlign.justify),
             if (post.id != null) Container(
               padding: const EdgeInsets.all(20),
               child: RaisedButton(
@@ -463,14 +484,39 @@ class MyHomePageState extends State<MyHomePage>
                 padding: const EdgeInsets.all(8.0),
                 child: CircularProgressIndicator(),
               ),
+            Container(
+              padding: const EdgeInsets.all(5.0),
+              child: Row(
+              children: <Widget>[
+                if(_avatarUrl != null) 
+                  getAvatarWidget(_avatarUrl),
+                Flexible(
+                  child: TextField(
+                      controller: _replyController,
+                      onSubmitted: (s) => replyTo(post, _replyController.text),
+                      onTap: () => login(),
+                      style: TextStyle(fontSize: 16 * _scale),
+                      decoration: InputDecoration(
+                        hintText: 'Комментировать...',
+                        suffixIcon: IconButton(
+                          icon: Icon(Icons.send, color: Colors.lightBlue),
+                          onPressed: () => replyTo(post, _replyController.text),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             if(post.hasMoreComments)
               FlatButton(
                 onPressed: () {
                   loadMoreComments(post);
                 },
                 child: Text('Еще комментарии...', 
-                  style: const TextStyle(
-                    color: Colors.lightBlue)
+                  style: TextStyle(
+                    color: Colors.lightBlue,
+                    fontSize: 16 * _scale)
                   )
               )
           ],
@@ -480,7 +526,6 @@ class MyHomePageState extends State<MyHomePage>
   
     Iterable<Widget> getWidgetReplies(Post post) 
     {
-      final double avatarSize = 32;
       return post.replies.map((reply) 
         => Container(
           alignment: Alignment.centerLeft,
@@ -490,21 +535,7 @@ class MyHomePageState extends State<MyHomePage>
             children: <Widget>[
               InkWell(
                 onTap: () => gotoAuthor(reply),
-                child: Container(
-                  padding: const EdgeInsets.only(right: 10),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(avatarSize),
-                    child: CachedNetworkImage(
-                      width: avatarSize,
-                      height: avatarSize,
-                      placeholder: (context, url) => Container(
-                        width: avatarSize,
-                        height: avatarSize,
-                        child: CircularProgressIndicator()),
-                      imageUrl: reply.img,
-                    ),
-                  ),
-                ),
+                child: getAvatarWidget(reply.img),
               ),
               Flexible(
                 child: Column(
@@ -531,8 +562,26 @@ class MyHomePageState extends State<MyHomePage>
         );
     }
 
+    Container getAvatarWidget(String url) {
+      return Container(
+                padding: const EdgeInsets.only(right: 10),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(avatarSize),
+                  child: CachedNetworkImage(
+                    width: avatarSize,
+                    height: avatarSize,
+                    placeholder: (context, url) => Container(
+                      width: avatarSize,
+                      height: avatarSize,
+                      child: CircularProgressIndicator()),
+                    imageUrl: url,
+                  ),
+                ),
+              );
+    }
+
     void gotoPost(Post post) async {
-      var url = "https://vk.com/wall${post.id}";
+      var url = "https://vk.com/wall${ownerId}_${post.id}";
       if (await canLaunch(url)) {
         await launch(url);
       } else {
@@ -547,6 +596,70 @@ class MyHomePageState extends State<MyHomePage>
       } else {
         throw 'Could not launch $url';
       }
+    }
+
+    void login() async {
+      if (_vkToken != null)
+        return;
+        
+      final token = await showDialog<String>(
+        context: context,
+        builder: (c) => AlertDialog(content: Authoriztion())
+      );
+
+      _vkToken = token;
+      try{
+        final avatarUrl = await getAvatarUrl(token);
+
+        setState(() {
+          _avatarUrl = avatarUrl;
+        });
+      } catch(e) {
+        
+      }
+    }
+
+    Future<String> getAvatarUrl(String token) async {
+      try {
+        final response = await http.get('https://api.vk.com/method/users.get?fields=photo_50&access_token=$token&v=5.92');
+        
+        if (response.statusCode == 200) {
+          var jsonResponse = json.decode(response.body);
+          return jsonResponse['response'][0]['photo_50'].toString();
+        }
+
+        return null;
+      }
+      catch(e) {
+        throw Exception("Ошибка. Проверьте соединение с Интернет");
+      }
+    }
+
+    void replyTo(Post post, String replyContent) async {
+      print(post.id + _vkToken + replyContent);
+      // try {
+      //   final response = await http.post('https://vk.com/al_wall.php', body: {
+      //     'act': 'get_post_replies',
+      //     'owner_id': ownerId,
+      //     'item_id': post.id,
+      //     'order': 'desc',
+      //     'al': '1'
+      //   });
+
+      //   if (response.statusCode == 200) {
+      //     var jsonResponse = json.decode(response.body.substring(4));
+      //     var payload = jsonResponse['payload'][1][0].toString();
+      //     var document = parse(decodeCp1251(payload));
+          
+      //     setState(() {
+      //       post.replies = getReplies(document.querySelectorAll('.reply'));
+      //       _commentsLoading = false;
+      //     }); 
+      //   }
+      // } 
+      // catch(e) {
+      //   throw Exception("Ошибка. Проверьте соединение с Интернет");
+      // }
     }
 }
 
