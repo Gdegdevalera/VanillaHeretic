@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:share/share.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -364,13 +365,31 @@ class MyHomePageState extends State<MyHomePage>
           children: <Widget>[
             Text('Опубликовано: ${post.date}\n', style: textStyle),
             Text(post.content, style: textStyle, textAlign: TextAlign.justify),
-            if (post.id != null) Container(
-              padding: const EdgeInsets.all(20),
-              child: RaisedButton(
-                child: Text('Открыть пост VK'), 
-                color: Colors.lightBlue,
-                textColor: Colors.white,
-                onPressed: () => gotoPost(post)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: <Widget>[
+                Padding(padding: const EdgeInsets.all(20.0)),
+                Spacer(),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  child: RaisedButton(
+                    child: Text('Открыть пост VK'), 
+                    color: Colors.lightBlue,
+                    textColor: Colors.white,
+                    onPressed: () => gotoPost(post)),
+                ),
+                Spacer(),
+                InkWell(
+                  onTap: () {
+                    Share.share('https://vk.com/wall${VkApi.ownerId}_${post.id}');
+                  },
+                  child: 
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Icon(Icons.share, color: Colors.lightBlue),
+                  ),
+                )
+              ]
             ),
             if(_replyToCommentId != null)
               Padding(
