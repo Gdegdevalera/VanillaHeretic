@@ -64,13 +64,16 @@ class VkApi {
             value: (x) => x);
 
         List<Reply> replies = jsonResponse['response']['items']
+          .where((x) => x['deleted'] == null)
           .map<Reply>((x) => Reply()
             ..id = x['id'].toString()
             ..date = dateFormat.format(DateTime.fromMillisecondsSinceEpoch(x['date'] * 1000))
             ..content = x['text']
             ..profile = profiles[x['from_id']]
             ..threadCount = x['thread']['count']
-            ..thread = x['thread']['items'].map<Reply>((y) => Reply()
+            ..thread = x['thread']['items']
+              .where((y) => y['deleted'] == null)
+              .map<Reply>((y) => Reply()
               ..id = y['id'].toString()
               ..date = dateFormat.format(DateTime.fromMillisecondsSinceEpoch(y['date'] * 1000))
               ..content = _clearMessage(y['text'])
