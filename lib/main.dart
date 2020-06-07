@@ -2,7 +2,9 @@ import 'package:VanillaHeretic/authorization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_native_admob/flutter_native_admob.dart';
+import 'package:flutter_native_admob/native_admob_controller.dart';
+import 'package:flutter_native_admob/native_admob_options.dart';
 import 'package:share/share.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -52,6 +54,7 @@ class MyHomePageState extends State<MyHomePage>
   final maxScale = 1.5;
   final double avatarSize = 32;
 
+  final _nativeAdController = NativeAdmobController();
   final _scroller = ScrollController();
   AnimationController _animationController;
   int _updateFactor = 0;
@@ -66,7 +69,7 @@ class MyHomePageState extends State<MyHomePage>
   int _totalIndex = 0;
   double _scale = 1.0;
   double _previousScale;
-  double _factor = 0.0;
+  double _movementFactor = 0.0;
   Animation<double> _animation;
   
   TextEditingController _replyController = TextEditingController();
@@ -80,7 +83,7 @@ class MyHomePageState extends State<MyHomePage>
     _animationController = AnimationController(vsync: this);
     _animationController.addListener(() {
       setState(() {
-        _factor = _animation.value;
+        _movementFactor = _animation.value;
       });
     });
 
@@ -126,7 +129,7 @@ class MyHomePageState extends State<MyHomePage>
   runAnimation() {
     _animation = _animationController.drive(
       Tween(
-        begin: _factor,
+        begin: _movementFactor,
         end: 0.0
       )
     );
@@ -148,11 +151,18 @@ class MyHomePageState extends State<MyHomePage>
     return prevFuture.then((oldTexts) {
       return VkApi.fetch(_totalIndex, (v) { _totalIndex += v; }).then((newTexts) {
         _loading = false;
-        return oldTexts +
+              
+        // Insert native adv into random place      
+        //newTexts.insert((newTexts.length / 2).round(), Post()..adv = true);
+        newTexts[(newTexts.length / 2).round()].adv = true;
+
+        var result = oldTexts +
           newTexts
               .where((y) => oldTexts.every((x) =>
+                  x.adv || y.adv ||
                   x.content.substring(0, 10) != y.content.substring(0, 10)))
               .toList();
+        return result;
       }, onError: (error) {
         _loading = false;
         if(oldTexts.length > 0) return oldTexts;
@@ -221,7 +231,7 @@ class MyHomePageState extends State<MyHomePage>
                           _animationController.stop();
                           _updateFactor++;
                           var screenWidth = screenSize.width;
-                          _factor += details.delta.dx / screenWidth;
+                          _movementFactor += details.delta.dx / screenWidth;
 
                           if(_updateFactor == 1)
                           {
@@ -233,15 +243,15 @@ class MyHomePageState extends State<MyHomePage>
                         },
                         onHorizontalDragEnd: (details) {
                           setState(() {
-                            if (_factor.abs() > 0.1) {
-                              if (_factor > 0 
+                            if (_movementFactor.abs() > 0.1) {
+                              if (_movementFactor > 0 
                                 && _viewIndex > 0) {
-                                  _factor -= 1;
+                                  _movementFactor -= 1;
                                   _viewIndex--;
                               } 
-                              else if (_factor < 0 
+                              else if (_movementFactor < 0 
                                 && _viewIndex < snapshot.data.length - 1) {
-                                  _factor += 1;
+                                  _movementFactor += 1;
                                   _viewIndex++;
                               }
                               _scroller.jumpTo(0);
@@ -260,30 +270,30 @@ class MyHomePageState extends State<MyHomePage>
                             children: [
                               Transform(
                                 transform: Matrix4.identity()
-                                  ..translate(_factor * screenSize.width)
+                                  ..translate(_movementFactor * screenSize.width)
                                   ..setEntry(3, 2, 0.001)
-                                  ..rotateY(0 - math.pi / 2 * _factor / 4)
+                                  ..rotateY(0 - math.pi / 2 * _movementFactor / 4)
                                   ,
-                                alignment: _factor >= 0 ? Alignment.centerLeft : Alignment.centerRight,
+                                alignment: _movementFactor >= 0 ? Alignment.centerLeft : Alignment.centerRight,
                                 child: SingleChildScrollView(
                                     controller: _scroller,
                                     child: getContent(snapshot.data, _viewIndex, screenSize)),
                               ),
-                              if (_factor < -0.0001) Transform(
+                              if (_movementFactor < -0.0001 || snapshot.data[math.min(_viewIndex + 1, snapshot.data.length - 1)].adv) Transform(
                                 transform: Matrix4.identity()
-                                  ..translate((_factor + 1) * MediaQuery.of(context).size.width)
+                                  ..translate((_movementFactor + 1) * MediaQuery.of(context).size.width)
                                   ..setEntry(3, 2, -0.001)
-                                  ..rotateY(math.pi / 8 + math.pi / 2 * _factor / 4),
+                                  ..rotateY(math.pi / 8 + math.pi / 2 * _movementFactor / 4),
                                 alignment: Alignment.centerLeft,
                                 child: SingleChildScrollView(
                                   child: getContent(snapshot.data, _viewIndex + 1, screenSize)
                                   )
                               ),
-                              if (_factor > 0.0001) Transform(
+                              if (_movementFactor > 0.0001 || snapshot.data[math.max(_viewIndex - 1, 0)].adv) Transform(
                                 transform: Matrix4.identity()
-                                  ..translate((_factor - 1)* MediaQuery.of(context).size.width)
+                                  ..translate((_movementFactor - 1)* MediaQuery.of(context).size.width)
                                   ..setEntry(3, 2, 0.001)
-                                  ..rotateY(math.pi / 8 - math.pi / 2 * _factor / 4),
+                                  ..rotateY(math.pi / 8 - math.pi / 2 * _movementFactor / 4),
                                 alignment: Alignment.centerRight,
                                 child: SingleChildScrollView(
                                   child: getContent(snapshot.data, _viewIndex - 1, screenSize)
@@ -357,14 +367,28 @@ class MyHomePageState extends State<MyHomePage>
   Widget getContent(List<Post> data, int index, Size screenSize) {
     if (index < 0 || index >= data.length) return null;
 
-    var textStyle = GoogleFonts.openSans(fontSize: 16 * _scale);
+    var textStyle = TextStyle(fontSize: 16 * _scale);
     var post = data[index];
+
     return Container(
         padding: const EdgeInsets.fromLTRB(10, 0, 10, 300),
         child: Column(
           children: <Widget>[
             Text('Опубликовано: ${post.date}\n', style: textStyle),
             Text(post.content, style: textStyle, textAlign: TextAlign.justify),
+            if(post.adv) 
+              Container(
+                padding: const EdgeInsets.all(8.0),
+                width: screenSize.width,
+                height: 350,
+                child: NativeAdmob(
+                  options: NativeAdmobOptions(),
+                    // Test ad unit id
+                    adUnitID: 'ca-app-pub-3940256099942544/2247696110',
+                    controller: _nativeAdController,
+                    loading: Container(child: CircularProgressIndicator()),
+                  ),
+              ),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: <Widget>[
