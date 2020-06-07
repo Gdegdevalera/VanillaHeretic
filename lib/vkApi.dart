@@ -1,7 +1,6 @@
 import 'package:http/http.dart' as http;
 import 'dart:convert' show json;
 import 'models.dart';
-import 'package:intl/intl.dart';
 
 class VkApi {
 

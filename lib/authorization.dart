@@ -8,7 +8,7 @@ class Authoriztion extends StatefulWidget {
 class _AuthoriztionState extends State<Authoriztion> {
 
   var authUrl = "https://oauth.vk.com/authorize?client_id=7495305&display=page&" +
-      "redirect_uri=https://oauth.vk.com/blank.html&scope=wall&response_type=token&v=5.92";
+      "redirect_uri=https://oauth.vk.com/blank.html&scope=wall,offline&response_type=token&v=5.92";
 
   final flutterWebviewPlugin = new FlutterWebviewPlugin();
 
