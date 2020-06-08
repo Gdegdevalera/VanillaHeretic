@@ -52,7 +52,7 @@ class MyHomePageState extends State<MyHomePage>
 
   final minScale = 0.5;
   final maxScale = 1.5;
-  final double avatarSize = 32;
+  final avatarSize = 32.0;
 
   final _nativeAdController = NativeAdmobController();
   final _scroller = ScrollController();
@@ -74,6 +74,12 @@ class MyHomePageState extends State<MyHomePage>
   
   TextEditingController _replyController = TextEditingController();
   String _replyToCommentId;
+
+  TextStyle mainTextStyle;
+  TextStyle contentTextStyle;
+  TextStyle actionTextStyle;
+  TextStyle dateTextStyle;
+  TextStyle lightblueTextStyle;
 
   @override
   void initState() {
@@ -108,6 +114,7 @@ class MyHomePageState extends State<MyHomePage>
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _scale = prefs.getDouble('scale') ?? 1.0;
+      updateTextStyles();
       _vkToken = prefs.getString('vkToken');
     });
 
@@ -118,6 +125,24 @@ class MyHomePageState extends State<MyHomePage>
       await _showOnboarding();
       await prefs.setBool('skipOnboarding', true);
     }
+  }
+
+  updateTextStyles() {
+    mainTextStyle = TextStyle(
+      fontFamily: 'Baskerville', 
+      fontSize: 16 * _scale);
+      
+    contentTextStyle = TextStyle(
+      fontFamily: 'Baskerville', 
+      fontSize: 16 * _scale);
+
+    actionTextStyle = TextStyle(
+      fontSize: 16 * _scale, 
+      color: Colors.blue);
+
+    dateTextStyle = TextStyle( 
+      fontSize: 16 * _scale, 
+      color: Colors.grey);
   }
 
   savePreferences() async {
@@ -202,127 +227,128 @@ class MyHomePageState extends State<MyHomePage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-        body: SafeArea(
-          child: Center(
-            child: FutureBuilder<List<Post>>(
-                future: _texts,
-                builder: (context, snapshot) {
-                  if ((!_loading || _viewIndex != 0) && snapshot.hasData) {
-                    var screenSize = MediaQuery.of(context).size;
-                    return GestureDetector(
-                        onScaleStart: (ScaleStartDetails details) {
-                          _previousScale = _scale;
-                        },
-                        onScaleUpdate: (ScaleUpdateDetails details) {
-                          setState(() {
-                            var newScale = _previousScale * details.scale;
-                            if (newScale >= minScale && newScale <= maxScale) {
-                              _scale = newScale;
-                            }
-                            if (newScale < minScale) _scale = minScale;
-                            if (newScale > maxScale) _scale = maxScale;
-                          });
-                        },
-                        onScaleEnd: (ScaleEndDetails details) {
-                          _previousScale = null;
-                          savePreferences();
-                        },
-                        onHorizontalDragUpdate: (details) {
-                          _animationController.stop();
-                          _updateFactor++;
-                          var screenWidth = screenSize.width;
-                          _movementFactor += details.delta.dx / screenWidth;
-
-                          if(_updateFactor == 1)
-                          {
-                            setState(() { });
+      body: SafeArea(
+        child: Center(
+          child: FutureBuilder<List<Post>>(
+              future: _texts,
+              builder: (context, snapshot) {
+                if ((!_loading || _viewIndex != 0) && snapshot.hasData) {
+                  var screenSize = MediaQuery.of(context).size;
+                  return GestureDetector(
+                      onScaleStart: (ScaleStartDetails details) {
+                        _previousScale = _scale;
+                      },
+                      onScaleUpdate: (ScaleUpdateDetails details) {
+                        setState(() {
+                          var newScale = _previousScale * details.scale;
+                          if (newScale >= minScale && newScale <= maxScale) {
+                            _scale = newScale;
                           }
+                          if (newScale < minScale) _scale = minScale;
+                          if (newScale > maxScale) _scale = maxScale;
+                          updateTextStyles();
+                        });
+                      },
+                      onScaleEnd: (ScaleEndDetails details) {
+                        _previousScale = null;
+                        savePreferences();
+                      },
+                      onHorizontalDragUpdate: (details) {
+                        _animationController.stop();
+                        _updateFactor++;
+                        var screenWidth = screenSize.width;
+                        _movementFactor += details.delta.dx / screenWidth;
 
-                          if(_updateFactor >= 5)
-                            _updateFactor = 0;
-                        },
-                        onHorizontalDragEnd: (details) {
-                          setState(() {
-                            if (_movementFactor.abs() > 0.1) {
-                              if (_movementFactor > 0 
-                                && _viewIndex > 0) {
-                                  _movementFactor -= 1;
-                                  _viewIndex--;
-                              } 
-                              else if (_movementFactor < 0 
-                                && _viewIndex < snapshot.data.length - 1) {
-                                  _movementFactor += 1;
-                                  _viewIndex++;
-                              }
-                              _scroller.jumpTo(0);
+                        if(_updateFactor == 1)
+                        {
+                          setState(() { });
+                        }
+
+                        if(_updateFactor >= 5)
+                          _updateFactor = 0;
+                      },
+                      onHorizontalDragEnd: (details) {
+                        setState(() {
+                          if (_movementFactor.abs() > 0.1) {
+                            if (_movementFactor > 0 
+                              && _viewIndex > 0) {
+                                _movementFactor -= 1;
+                                _viewIndex--;
+                            } 
+                            else if (_movementFactor < 0 
+                              && _viewIndex < snapshot.data.length - 1) {
+                                _movementFactor += 1;
+                                _viewIndex++;
                             }
-                          });
-                          _replyController.clear();
-                          _replyToCommentId = null;
-                          runAnimation();
-
-                          if (!_loading && _viewIndex > snapshot.data.length - 3) {
-                            _texts = fetchTexts(prevFuture: _texts);
+                            _scroller.jumpTo(0);
                           }
-                        },
-                        child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Transform(
-                                transform: Matrix4.identity()
-                                  ..translate(_movementFactor * screenSize.width)
-                                  ..setEntry(3, 2, 0.001)
-                                  ..rotateY(0 - math.pi / 2 * _movementFactor / 4)
-                                  ,
-                                alignment: _movementFactor >= 0 ? Alignment.centerLeft : Alignment.centerRight,
-                                child: SingleChildScrollView(
-                                    controller: _scroller,
-                                    child: getContent(snapshot.data, _viewIndex, screenSize)),
-                              ),
-                              if (_movementFactor < -0.0001 || snapshot.data[math.min(_viewIndex + 1, snapshot.data.length - 1)].adv) Transform(
-                                transform: Matrix4.identity()
-                                  ..translate((_movementFactor + 1) * MediaQuery.of(context).size.width)
-                                  ..setEntry(3, 2, -0.001)
-                                  ..rotateY(math.pi / 8 + math.pi / 2 * _movementFactor / 4),
-                                alignment: Alignment.centerLeft,
-                                child: SingleChildScrollView(
-                                  child: getContent(snapshot.data, _viewIndex + 1, screenSize)
-                                  )
-                              ),
-                              if (_movementFactor > 0.0001 || snapshot.data[math.max(_viewIndex - 1, 0)].adv) Transform(
-                                transform: Matrix4.identity()
-                                  ..translate((_movementFactor - 1)* MediaQuery.of(context).size.width)
-                                  ..setEntry(3, 2, 0.001)
-                                  ..rotateY(math.pi / 8 - math.pi / 2 * _movementFactor / 4),
-                                alignment: Alignment.centerRight,
-                                child: SingleChildScrollView(
-                                  child: getContent(snapshot.data, _viewIndex - 1, screenSize)
-                                  )
-                              ),
-                            ]
-                        )
-                      );
-                  } else if (snapshot.hasError) {
-                    return Text("${snapshot.error}");
-                  }
+                        });
+                        _replyController.clear();
+                        _replyToCommentId = null;
+                        runAnimation();
 
-                  // By default, show a loading spinner.
-                  return CircularProgressIndicator();
-                }),
-          ),
+                        if (!_loading && _viewIndex > snapshot.data.length - 3) {
+                          _texts = fetchTexts(prevFuture: _texts);
+                        }
+                      },
+                      child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Transform(
+                              transform: Matrix4.identity()
+                                ..translate(_movementFactor * screenSize.width)
+                                ..setEntry(3, 2, 0.001)
+                                ..rotateY(0 - math.pi / 2 * _movementFactor / 4)
+                                ,
+                              alignment: _movementFactor >= 0 ? Alignment.centerLeft : Alignment.centerRight,
+                              child: SingleChildScrollView(
+                                  controller: _scroller,
+                                  child: getContent(snapshot.data, _viewIndex, screenSize)),
+                            ),
+                            if (_movementFactor < -0.0001 || snapshot.data[math.min(_viewIndex + 1, snapshot.data.length - 1)].adv) Transform(
+                              transform: Matrix4.identity()
+                                ..translate((_movementFactor + 1) * MediaQuery.of(context).size.width)
+                                ..setEntry(3, 2, -0.001)
+                                ..rotateY(math.pi / 8 + math.pi / 2 * _movementFactor / 4),
+                              alignment: Alignment.centerLeft,
+                              child: SingleChildScrollView(
+                                child: getContent(snapshot.data, _viewIndex + 1, screenSize)
+                                )
+                            ),
+                            if (_movementFactor > 0.0001 || snapshot.data[math.max(_viewIndex - 1, 0)].adv) Transform(
+                              transform: Matrix4.identity()
+                                ..translate((_movementFactor - 1)* MediaQuery.of(context).size.width)
+                                ..setEntry(3, 2, 0.001)
+                                ..rotateY(math.pi / 8 - math.pi / 2 * _movementFactor / 4),
+                              alignment: Alignment.centerRight,
+                              child: SingleChildScrollView(
+                                child: getContent(snapshot.data, _viewIndex - 1, screenSize)
+                                )
+                            ),
+                          ]
+                      )
+                    );
+                } else if (snapshot.hasError) {
+                  return Text("${snapshot.error}");
+                }
+
+                // By default, show a loading spinner.
+                return CircularProgressIndicator();
+              }),
         ),
-        floatingActionButton: MediaQuery.of(context).viewInsets.bottom != 0 
-          ? null 
-          : FloatingActionButton(
-              onPressed: refresh,
-              tooltip: 'Refresh',
-              child: Icon(Icons.refresh),
-          )
-      );
+      ),
+      floatingActionButton: MediaQuery.of(context).viewInsets.bottom != 0 
+        ? null 
+        : FloatingActionButton(
+            onPressed: refresh,
+            tooltip: 'Refresh',
+            child: Icon(Icons.refresh),
+        )
+    );
   }
 
   Future<void> _showOnboarding() async {
-    final double fontSize = 15;
+    final textStyle = TextStyle(fontSize: 15);
     return showDialog<void>(
       context: context,
       barrierDismissible: false, // user must tap button!
@@ -333,15 +359,14 @@ class MyHomePageState extends State<MyHomePage>
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: <Widget>[
-                Text("Свайпай чтобы листать", style: TextStyle(fontSize: fontSize)),
+                Text("Свайпай чтобы листать", style: textStyle),
                 Padding(
                     padding: const EdgeInsets.all(30),
                     child: Image.asset(
                       'images/suggestion_swipe.png',
                       height: 70,
                     )),
-                Text("Текст можно растягивать",
-                    style: TextStyle(fontSize: fontSize)),
+                Text("Текст можно растягивать", style: textStyle),
                 Padding(
                     padding: const EdgeInsets.all(30),
                     child: Image.asset(
@@ -351,7 +376,7 @@ class MyHomePageState extends State<MyHomePage>
                 RaisedButton(
                     color: Colors.lightBlue,
                     textColor: Colors.white,
-                    child: Text('Понятно', style: TextStyle(fontSize: fontSize)),
+                    child: Text('Понятно', style: textStyle),
                     onPressed: () {
                       Navigator.of(context).pop();
                     },
@@ -366,16 +391,14 @@ class MyHomePageState extends State<MyHomePage>
 
   Widget getContent(List<Post> data, int index, Size screenSize) {
     if (index < 0 || index >= data.length) return null;
-
-    var textStyle = TextStyle(fontSize: 16 * _scale);
     var post = data[index];
 
     return Container(
         padding: const EdgeInsets.fromLTRB(10, 0, 10, 300),
         child: Column(
           children: <Widget>[
-            Text('Опубликовано: ${post.date}\n', style: textStyle),
-            Text(post.content, style: textStyle, textAlign: TextAlign.justify),
+            Text('Опубликовано: ${post.date}\n', style: dateTextStyle),
+            Text(post.content, style: contentTextStyle, textAlign: TextAlign.justify),
             if(post.adv) 
               Container(
                 padding: const EdgeInsets.all(8.0),
@@ -421,10 +444,7 @@ class MyHomePageState extends State<MyHomePage>
                 child: InkWell(
                   onTap: () => setState(() { _replyToCommentId = null; }),
                   child: Text('Ответить на пост', 
-                    style: TextStyle(
-                      color: Colors.lightBlue,
-                      fontSize: 16 * _scale)
-                    ),
+                    style: actionTextStyle),
                 ),
               ),
             if(_replyToCommentId == null)
@@ -442,10 +462,8 @@ class MyHomePageState extends State<MyHomePage>
                   loadComments(post);
                 },
                 child: Text('Показать комментарии (${post.repliesCount})', 
-                  style: TextStyle(
-                    color: Colors.lightBlue,
-                    fontSize: 16 * _scale)
-                  )
+                  style: actionTextStyle
+                )
               )
           ],
         ),
@@ -467,7 +485,7 @@ class MyHomePageState extends State<MyHomePage>
               controller: _replyController,
               onSubmitted: (s) => replyTo(post, _replyController.text),
               onTap: () => ensureUserLoggedIn(),
-              style: TextStyle(fontSize: 16 * _scale),
+              style: mainTextStyle,
               decoration: InputDecoration(
                 hintText: 'Комментировать...',
                 suffixIcon: IconButton(
@@ -501,23 +519,23 @@ class MyHomePageState extends State<MyHomePage>
                   InkWell(
                     onTap: () => gotoAuthor(reply.profile.screenName),
                     child: Text(reply.profile.name, 
-                      style: TextStyle(color: Colors.blue, fontSize: 16 * _scale)
+                      style: actionTextStyle
                     ),
                   ),
                   Text(reply.content, 
-                    style: TextStyle(fontSize: 16 * _scale)
+                    style: mainTextStyle
                   ),
                   Row(
                     children: <Widget>[
                       Text(reply.date,
-                        style: TextStyle(color: Colors.grey, fontSize: 16 * _scale)
+                        style: dateTextStyle
                       ),
                       if(_replyToCommentId != reply.id)
                         InkWell(
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
                             child: Text('Ответить',
-                              style: TextStyle(color: Colors.lightBlue, fontSize: 16 * _scale)
+                              style: actionTextStyle
                             ),
                           ),
                           onTap: () {
