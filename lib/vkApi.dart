@@ -57,7 +57,7 @@ class VkApi {
               ..id = x['id']
               ..name = '${x["first_name"]} ${x["last_name"]}'
               ..img = x['photo_50']
-              ..url = x['screen_name']
+              ..screenName = x['screen_name']
             ), 
             key: (x) => x.id, 
             value: (x) => x);
@@ -94,19 +94,22 @@ class VkApi {
     return null;
   }
 
-  static Future<String> getUserAvatarUrl(String token) async {
+  static Future<Profile> getProfile(String token) async {
     if (token == null)
       return null;
 
     try {
       final response = await http.get(baseUrl
-        + '/users.get?fields=photo_50&access_token=$token&v=5.92');
+        + '/users.get?fields=photo_50,screen_name&lang=ru&access_token=$token&v=5.92');
       
       if (response.statusCode == 200) {
         final jsonResponse = json.decode(response.body);
-        final avatarUrl = jsonResponse['response'][0]['photo_50'].toString();
+        final jsonProfile = jsonResponse['response'][0];
 
-        return avatarUrl;
+        return Profile()
+          ..name = '${jsonProfile['first_name']} ${jsonProfile['last_name']}'
+          ..img = jsonProfile['photo_50'].toString()
+          ..screenName = jsonProfile['screen_name'].toString();
       } 
     }
     catch(e) {

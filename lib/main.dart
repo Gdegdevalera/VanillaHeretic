@@ -60,7 +60,7 @@ class MyHomePageState extends State<MyHomePage>
   int _updateFactor = 0;
 
   String _vkToken;
-  String _avatarUrl;
+  Profile _profile;
 
   Future<List<Post>> _texts;
   bool _loading = false;
@@ -317,7 +317,7 @@ class MyHomePageState extends State<MyHomePage>
               onPressed: refresh,
               tooltip: 'Refresh',
               child: Icon(Icons.refresh),
-            )
+          )
       );
   }
 
@@ -457,8 +457,11 @@ class MyHomePageState extends State<MyHomePage>
       padding: const EdgeInsets.all(5.0),
       child: Row(
       children: <Widget>[
-        if(_avatarUrl != null) 
-          getAvatarWidget(_avatarUrl),
+        if(_profile != null) 
+          InkWell(
+            onTap: avatarTap,
+            child: getAvatarWidget(_profile.img)
+          ),
         Flexible(
           child: TextField(
               controller: _replyController,
@@ -488,7 +491,7 @@ class MyHomePageState extends State<MyHomePage>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             InkWell(
-              onTap: () => gotoAuthor(reply),
+              onTap: () => gotoAuthor(reply.profile.screenName),
               child: getAvatarWidget(reply.profile.img),
             ),
             Flexible(
@@ -496,7 +499,7 @@ class MyHomePageState extends State<MyHomePage>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   InkWell(
-                    onTap: () => gotoAuthor(reply),
+                    onTap: () => gotoAuthor(reply.profile.screenName),
                     child: Text(reply.profile.name, 
                       style: TextStyle(color: Colors.blue, fontSize: 16 * _scale)
                     ),
@@ -538,22 +541,62 @@ class MyHomePageState extends State<MyHomePage>
       );
     }
 
-    Container getAvatarWidget(String url) 
+    Widget getAvatarWidget(String url) 
       => Container(
-          padding: const EdgeInsets.only(right: 10),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(avatarSize),
-            child: CachedNetworkImage(
-              width: avatarSize,
-              height: avatarSize,
-              placeholder: (context, url) => Container(
+            padding: const EdgeInsets.only(right: 10),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(avatarSize),
+              child: CachedNetworkImage(
                 width: avatarSize,
                 height: avatarSize,
-                child: CircularProgressIndicator()),
-              imageUrl: url,
+                placeholder: (context, url) => Container(
+                  width: avatarSize,
+                  height: avatarSize,
+                  child: CircularProgressIndicator()),
+                imageUrl: url,
+              ),
             ),
-          ),
-        );
+          );
+
+    void avatarTap() {
+      showDialog<void>(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            content: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Text(_profile.name),
+                ),
+                RaisedButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    gotoAuthor(_profile.screenName);
+                  },
+                  color: Colors.lightBlue,
+                  textColor: Colors.white,
+                  child: Text('Открыть профиль VK'),
+                ),
+                FlatButton(
+                  onPressed: () {
+                    setState(() {
+                      _vkToken = null;
+                      _profile = null;
+                    });
+                    Navigator.of(context).pop();
+                  },
+                  textColor: Colors.lightBlue,
+                  child: Text('Выйти из VK'),
+                ),
+              ],
+            )
+          );
+        });
+    }
 
     void gotoPost(Post post) async {
       var url = "https://vk.com/wall${VkApi.ownerId}_${post.id}";
@@ -564,8 +607,8 @@ class MyHomePageState extends State<MyHomePage>
       }
     }
 
-    void gotoAuthor(Reply reply) async {
-      var url = "https://vk.com/${reply.profile.url}";
+    void gotoAuthor(String screenName) async {
+      var url = "https://vk.com/$screenName";
       if (await canLaunch(url)) {
         await launch(url);
       } else {
@@ -591,11 +634,11 @@ class MyHomePageState extends State<MyHomePage>
       if(_vkToken == null)
         return;
 
-      final avatarUrl = await VkApi.getUserAvatarUrl(_vkToken);
-      if(avatarUrl != null)
+      final profile = await VkApi.getProfile(_vkToken);
+      if(profile != null)
       {
         setState(() {
-          _avatarUrl = avatarUrl;
+          _profile = profile;
         });
       } else {
         setState(() { _vkToken = null; });

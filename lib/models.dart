@@ -11,7 +11,7 @@ class Profile {
   int id;
   String name;
   String img;
-  String url;
+  String screenName;
 }
 
 class Post {
