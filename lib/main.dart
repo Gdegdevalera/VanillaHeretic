@@ -13,8 +13,8 @@ import 'dart:math' as math;
 import 'models.dart';
 import 'vkApi.dart';
 
-void main() {
-    
+void main() {  
+  
   SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
     systemNavigationBarColor: Colors.transparent,
     systemNavigationBarIconBrightness: Brightness.dark,
@@ -85,7 +85,7 @@ class MyHomePageState extends State<MyHomePage>
   void initState() {
     super.initState();
     _texts = fetchTexts();
-
+    
     _animationController = AnimationController(vsync: this);
     _animationController.addListener(() {
       setState(() {
@@ -130,18 +130,18 @@ class MyHomePageState extends State<MyHomePage>
   updateTextStyles() {
     mainTextStyle = TextStyle(
       fontFamily: 'Baskerville', 
-      fontSize: 16 * _scale);
+      fontSize: 18 * _scale);
       
     contentTextStyle = TextStyle(
       fontFamily: 'Baskerville', 
-      fontSize: 16 * _scale);
+      fontSize: 18 * _scale);
 
     actionTextStyle = TextStyle(
-      fontSize: 16 * _scale, 
+      fontSize: 18 * _scale, 
       color: Colors.blue);
 
     dateTextStyle = TextStyle( 
-      fontSize: 16 * _scale, 
+      fontSize: 18 * _scale, 
       color: Colors.grey);
   }
 
@@ -177,9 +177,10 @@ class MyHomePageState extends State<MyHomePage>
       return VkApi.fetch(_totalIndex, (v) { _totalIndex += v; }).then((newTexts) {
         _loading = false;
               
-        // Insert native adv into random place      
-        //newTexts.insert((newTexts.length / 2).round(), Post()..adv = true);
-        newTexts[(newTexts.length / 2).round()].adv = true;
+        // Insert native adv into some place 
+        if(newTexts.length > 0) {
+          newTexts[(newTexts.length / 2).floor()].adv = true;
+        }
 
         var result = oldTexts +
           newTexts
@@ -233,6 +234,11 @@ class MyHomePageState extends State<MyHomePage>
               future: _texts,
               builder: (context, snapshot) {
                 if ((!_loading || _viewIndex != 0) && snapshot.hasData) {
+                  if(snapshot.data.length == 0) {
+                    _texts = fetchTexts(prevFuture: _texts);
+                    return CircularProgressIndicator();
+                  }
+
                   var screenSize = MediaQuery.of(context).size;
                   return GestureDetector(
                       onScaleStart: (ScaleStartDetails details) {
@@ -406,11 +412,19 @@ class MyHomePageState extends State<MyHomePage>
                 height: 350,
                 child: NativeAdmob(
                   options: NativeAdmobOptions(),
-                    // Test ad unit id
-                    adUnitID: 'ca-app-pub-3940256099942544/2247696110',
-                    controller: _nativeAdController,
-                    loading: Container(child: CircularProgressIndicator()),
+                  //error: Text("Failed to load the ad"),
+                  // Test: ca-app-pub-3940256099942544/2247696110
+                  // Prod: ca-app-pub-1301601306730673/5562894937
+                  adUnitID: 'ca-app-pub-1301601306730673/5562894937', 
+                  controller: _nativeAdController,
+                  loading: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: <Widget>[
+                      CircularProgressIndicator(),
+                    ],
                   ),
+                ),
               ),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
